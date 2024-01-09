@@ -12,6 +12,7 @@ enum RegisterSymbols {
     H,
     L,
     SP,
+    PSW,
     MEMORY,
 }
 
@@ -564,6 +565,34 @@ fn lxi_load_register_pair_immediate(state: &mut I8080State, register: RegisterSy
     state.program_counter += 3;
 }
 
+fn flags_to_u8(flags: &I8080Flags) -> u8 {
+    let mut result: u8 = 0x02;
+    if flags.sign {
+        result &= 0x80;
+    }
+    if flags.zero {
+        result &= 0x40;
+    }
+    if flags.auxiliary_carry {
+        result &= 0x10;
+    }
+    if flags.parity {
+        result &= 0x04;
+    }
+    if flags.carry {
+        result &= 0x01;
+    }
+    return result;
+}
+
+fn u8_to_flags(flags: &mut I8080Flags, value: u8) {
+    flags.sign = value & 0x80 != 0;
+    flags.zero = value & 0x40 != 0;
+    flags.auxiliary_carry = value & 0x10 != 0;
+    flags.parity = value & 0x04 != 0;
+    flags.carry = value & 0x01 != 0;
+}
+
 fn check_parity(value: u8) -> bool {
     let mut result = 0;
     for i in 0..8 {
@@ -618,6 +647,25 @@ fn adi_immediate_add(state: &mut I8080State) {
         state.memory[(state.program_counter + 1) as usize]
     );
     state.program_counter += 2;
+}
+
+// DAD register
+// Adds register pair to register pair HL, stores in HL
+fn dad_double_add(state: &mut I8080State, register: RegisterSymbols) {
+    let hl_val = ((state.reg_h as u16) << 8) | (state.reg_l as u16);
+    let rp_val = match register {
+        RegisterSymbols::B => ((state.reg_b as u16) << 8) | (state.reg_c as u16),
+        RegisterSymbols::D => ((state.reg_d as u16) << 8) | (state.reg_e as u16),
+        RegisterSymbols::H => hl_val,
+        RegisterSymbols::SP => state.stack_pointer,
+        _ => panic!("Register for DAD given is undefined"),
+    };
+
+    let result = hl_val.wrapping_add(rp_val);
+    state.reg_h = ((result >> 8) & 0xff) as u8;
+    state.reg_l = (result & 0xff) as u8;
+
+    state.program_counter += 1;
 }
 
 fn inr_increment_register(state: &mut I8080State, register: RegisterSymbols) {
@@ -857,6 +905,19 @@ fn mvi_immediate_move(state: &mut I8080State, register: RegisterSymbols) {
     state.program_counter += 2;
 }
 
+// XCHG
+// Exchange register pairs H,L and D,E
+fn xchg_exchange_registers(state: &mut I8080State) {
+    let tmp_d = state.reg_d;
+    let tmp_e = state.reg_e;
+    state.reg_d = state.reg_h;
+    state.reg_e = state.reg_l;
+    state.reg_h = tmp_d;
+    state.reg_e = tmp_e;
+
+    state.program_counter += 1;
+}
+
 // LDAX register
 // load the accumulator register (A) with the address in the register pair provided
 fn ldax_load_accumulator_indirect(state: &mut I8080State, register: RegisterSymbols) {
@@ -896,6 +957,56 @@ fn cpi_compare_immediate_to_accumulator(state: &mut I8080State) {
     state.program_counter += 2
 }
 
+fn push_add_to_stack(state: &mut I8080State, register: RegisterSymbols) {
+    match register {
+        RegisterSymbols::B => {
+            state.memory[(state.stack_pointer - 1) as usize] = state.reg_c;
+            state.memory[(state.stack_pointer - 2) as usize] = state.reg_b;
+        }
+        RegisterSymbols::D => {
+            state.memory[(state.stack_pointer - 1) as usize] = state.reg_e;
+            state.memory[(state.stack_pointer - 2) as usize] = state.reg_d;
+        }
+        RegisterSymbols::H => {
+            state.memory[(state.stack_pointer - 1) as usize] = state.reg_l;
+            state.memory[(state.stack_pointer - 2) as usize] = state.reg_h;
+        }
+        RegisterSymbols::PSW => {
+            state.memory[(state.stack_pointer - 1) as usize] = flags_to_u8(&state.flags);
+            state.memory[(state.stack_pointer - 2) as usize] = state.reg_a;
+        }
+        _ => panic!("Register for DCX given is undefined"),
+    }
+    state.stack_pointer -= 2;
+
+    state.program_counter += 1;
+}
+
+fn pop_remove_from_stack(state: &mut I8080State, register: RegisterSymbols) {
+    match register {
+        RegisterSymbols::B => {
+            state.reg_c = state.memory[(state.stack_pointer + 1) as usize];
+            state.reg_b = state.memory[state.stack_pointer as usize];
+        }
+        RegisterSymbols::D => {
+            state.reg_e = state.memory[(state.stack_pointer + 1) as usize];
+            state.reg_d = state.memory[state.stack_pointer as usize];
+        }
+        RegisterSymbols::H => {
+            state.reg_l = state.memory[(state.stack_pointer + 1) as usize];
+            state.reg_h = state.memory[state.stack_pointer as usize];
+        }
+        RegisterSymbols::PSW => {
+            u8_to_flags(
+                &mut state.flags,
+                state.memory[(state.stack_pointer - 1) as usize],
+            );
+            state.reg_a = state.memory[state.stack_pointer as usize];
+        }
+        _ => panic!("Register for POP given is undefined"),
+    }
+}
+
 fn emulate8080_op(state: &mut I8080State) {
     match state.memory[state.program_counter as usize] {
         0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xcb | 0xd9 | 0xdd | 0xed
@@ -905,6 +1016,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0x04 => inr_increment_register(state, RegisterSymbols::B),
         0x05 => dcr_decrement_register(state, RegisterSymbols::B),
         0x06 => mvi_immediate_move(state, RegisterSymbols::B),
+        0x09 => dad_double_add(state, RegisterSymbols::B),
         0x0a => ldax_load_accumulator_indirect(state, RegisterSymbols::B),
         0x0b => dcx_decrement_register_pair(state, RegisterSymbols::B),
         0x0c => inr_increment_register(state, RegisterSymbols::C),
@@ -915,6 +1027,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0x14 => inr_increment_register(state, RegisterSymbols::D),
         0x15 => dcr_decrement_register(state, RegisterSymbols::D),
         0x16 => mvi_immediate_move(state, RegisterSymbols::D),
+        0x19 => dad_double_add(state, RegisterSymbols::D),
         0x1a => ldax_load_accumulator_indirect(state, RegisterSymbols::D),
         0x1b => dcx_decrement_register_pair(state, RegisterSymbols::D),
         0x1c => inr_increment_register(state, RegisterSymbols::D),
@@ -925,6 +1038,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0x24 => inr_increment_register(state, RegisterSymbols::H),
         0x25 => dcr_decrement_register(state, RegisterSymbols::H),
         0x26 => mvi_immediate_move(state, RegisterSymbols::H),
+        0x29 => dad_double_add(state, RegisterSymbols::H),
         0x2b => dcx_decrement_register_pair(state, RegisterSymbols::H),
         0x2c => inr_increment_register(state, RegisterSymbols::L),
         0x2d => dcr_decrement_register(state, RegisterSymbols::L),
@@ -935,6 +1049,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0x34 => inr_increment_register(state, RegisterSymbols::MEMORY),
         0x35 => dcr_decrement_register(state, RegisterSymbols::MEMORY),
         0x36 => mvi_immediate_move(state, RegisterSymbols::MEMORY),
+        0x39 => dad_double_add(state, RegisterSymbols::SP),
         0x3b => dcx_decrement_register_pair(state, RegisterSymbols::SP),
         0x3c => inr_increment_register(state, RegisterSymbols::A),
         0x3d => dcr_decrement_register(state, RegisterSymbols::A),
@@ -1011,11 +1126,20 @@ fn emulate8080_op(state: &mut I8080State) {
         0x85 => add_register_add(state, RegisterSymbols::L),
         0x86 => add_register_add(state, RegisterSymbols::MEMORY),
         0x87 => add_register_add(state, RegisterSymbols::A),
+        0xc1 => pop_remove_from_stack(state, RegisterSymbols::B),
         0xc2 => jnz_jump_if_not_zero(state),
         0xc3 => jmp_jump(state),
+        0xc5 => push_add_to_stack(state, RegisterSymbols::B),
         0xc6 => adi_immediate_add(state),
         0xc9 => ret_function_return(state),
         0xcd => call_function_call(state),
+        0xd1 => pop_remove_from_stack(state, RegisterSymbols::D),
+        0xd5 => push_add_to_stack(state, RegisterSymbols::D),
+        0xe1 => pop_remove_from_stack(state, RegisterSymbols::D),
+        0xe5 => push_add_to_stack(state, RegisterSymbols::H),
+        0xeb => xchg_exchange_registers(state),
+        0xf1 => pop_remove_from_stack(state, RegisterSymbols::SP),
+        0xf5 => push_add_to_stack(state, RegisterSymbols::PSW),
         0xfe => cpi_compare_immediate_to_accumulator(state),
         _ => unimplemented_instruction(state),
     }
