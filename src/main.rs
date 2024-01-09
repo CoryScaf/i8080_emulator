@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::io;
 
+#[derive(Debug)]
 enum RegisterSymbols {
     A,
     B,
@@ -11,7 +12,7 @@ enum RegisterSymbols {
     H,
     L,
     SP,
-    MEMORY
+    MEMORY,
 }
 
 struct I8080Flags {
@@ -19,7 +20,7 @@ struct I8080Flags {
     sign: bool,
     parity: bool,
     carry: bool,
-    auxiliary_carry: bool
+    auxiliary_carry: bool,
 }
 
 struct I8080State {
@@ -34,24 +35,28 @@ struct I8080State {
     program_counter: u16,
     flags: I8080Flags,
     memory: Vec<u8>,
-    prev_op: u8
 }
 
 fn disassemble8080_op(code_buffer: &[u8], program_counter: usize) -> usize {
-    let mut op_bytes = 1; 
+    let mut op_bytes = 1;
     print!("{:04x} ", program_counter);
     match code_buffer[program_counter] {
-        0x00|0x08|0x10|0x18|0x20|0x28|0x30|0x38|0xcb|0xd9|0xdd|0xed|0xfd => print!("NOP"),
+        0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xcb | 0xd9 | 0xdd | 0xed
+        | 0xfd => print!("NOP"),
         0x01 => {
-            print!("LXI    B,#${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
+            print!(
+                "LXI    B,#${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
             op_bytes = 3
-        },
+        }
         0x02 => print!("STAX   B"),
         0x03 => print!("INX    B"),
         0x04 => print!("INR    B"),
         0x05 => print!("DCR    B"),
         0x06 => {
-            print!("MVI    B,#${:02x}", code_buffer[program_counter+1]);
+            print!("MVI    B,#${:02x}", code_buffer[program_counter + 1]);
             op_bytes = 2
         }
         0x07 => print!("RLC"),
@@ -61,12 +66,16 @@ fn disassemble8080_op(code_buffer: &[u8], program_counter: usize) -> usize {
         0x0c => print!("INR    C"),
         0x0d => print!("DCR    C"),
         0x0e => {
-            print!("MVI    C,#${:02x}", code_buffer[program_counter+1]);
+            print!("MVI    C,#${:02x}", code_buffer[program_counter + 1]);
             op_bytes = 2
-        },
+        }
         0x0f => print!("RRC"),
         0x11 => {
-            print!("LXI    D,#${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
+            print!(
+                "LXI    D,#${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
             op_bytes = 3
         }
         0x12 => print!("STAX   D"),
@@ -74,7 +83,7 @@ fn disassemble8080_op(code_buffer: &[u8], program_counter: usize) -> usize {
         0x14 => print!("INR    D"),
         0x15 => print!("DCR    D"),
         0x16 => {
-            print!("MVI    D,#${:02x}", code_buffer[program_counter+1]);
+            print!("MVI    D,#${:02x}", code_buffer[program_counter + 1]);
             op_bytes = 2
         }
         0x17 => print!("RAL"),
@@ -84,65 +93,89 @@ fn disassemble8080_op(code_buffer: &[u8], program_counter: usize) -> usize {
         0x1c => print!("INR    E"),
         0x1d => print!("DCR    E"),
         0x1e => {
-            print!("MVI    E,#${:02x}", code_buffer[program_counter+1]);
+            print!("MVI    E,#${:02x}", code_buffer[program_counter + 1]);
             op_bytes = 2
         }
         0x1f => print!("RAR"),
         0x21 => {
-            print!("LXI    H,#${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "LXI    H,#${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0x22 => {
-            print!("SHLD   ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "SHLD   ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0x23 => print!("INX    H"),
         0x24 => print!("INR    H"),
         0x25 => print!("DCR    H"),
         0x26 => {
-            print!("MVI    H,#${:02x}", code_buffer[program_counter+1]);
+            print!("MVI    H,#${:02x}", code_buffer[program_counter + 1]);
             op_bytes = 2
         }
         0x27 => print!("DAA"),
         0x29 => print!("DAD    H"),
         0x2a => {
-            print!("LHLD   ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "LHLD   ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0x2b => print!("DCX    H"),
         0x2c => print!("INR    L"),
         0x2d => print!("DCR    L"),
         0x2e => {
-            print!("MVI    L,#${:02x}", code_buffer[program_counter+1]);
+            print!("MVI    L,#${:02x}", code_buffer[program_counter + 1]);
             op_bytes = 2
         }
         0x2f => print!("CMA"),
         0x31 => {
-            print!("LXI    SP,#${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "LXI    SP,#${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0x32 => {
-            print!("STA    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "STA    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0x33 => print!("INX    SP"),
         0x34 => print!("INR    M"),
         0x35 => print!("DCR    M"),
         0x36 => {
-            print!("MVI    M,#${:02x}", code_buffer[program_counter+1]);
+            print!("MVI    M,#${:02x}", code_buffer[program_counter + 1]);
             op_bytes = 2
         }
         0x37 => print!("STC"),
         0x39 => print!("DAD    SP"),
         0x3a => {
-            print!("LDA    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "LDA    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0x3b => print!("DCX    SP"),
         0x3c => print!("INR    A"),
         0x3d => print!("DCR    A"),
         0x3e => {
-            print!("MVI    A,#${:02x}", code_buffer[program_counter+1]);
+            print!("MVI    A,#${:02x}", code_buffer[program_counter + 1]);
             op_bytes = 2
         }
         0x3f => print!("CMC"),
@@ -277,144 +310,216 @@ fn disassemble8080_op(code_buffer: &[u8], program_counter: usize) -> usize {
         0xc0 => print!("RNZ"),
         0xc1 => print!("POP    B"),
         0xc2 => {
-            print!("JNZ    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JNZ    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xc3 => {
-            print!("JMP    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JMP    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xc4 => {
-            print!("CNZ    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CNZ    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xc5 => print!("PUSH   B"),
         0xc6 => {
-            print!("ADI    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("ADI    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xc7 => print!("RST    0"),
         0xc8 => print!("RZ"),
         0xc9 => print!("RET"),
         0xca => {
-            print!("JZ     ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JZ     ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xcc => {
-            print!("CZ     ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CZ     ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xcd => {
-            print!("CALL   ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CALL   ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xce => {
-            print!("ACI    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("ACI    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xcf => print!("RST    1"),
         0xd0 => print!("RNC"),
         0xd1 => print!("POP    D"),
         0xd2 => {
-            print!("JNC    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JNC    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xd3 => {
-            print!("OUT    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("OUT    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xd4 => {
-            print!("CNC    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CNC    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xd5 => print!("PUSH   D"),
         0xd6 => {
-            print!("SUI    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("SUI    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xd7 => print!("RST    2"),
         0xd8 => print!("RC"),
         0xda => {
-            print!("JA     ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JA     ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xdb => {
-            print!("IN     #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("IN     #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xdc => {
-            print!("CC     ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CC     ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xde => {
-            print!("SBI    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("SBI    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xdf => print!("RST    3"),
         0xe0 => print!("RPO"),
         0xe1 => print!("POP    H"),
         0xe2 => {
-            print!("JPO    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JPO    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xe3 => print!("XTHL"),
         0xe4 => {
-            print!("CPO    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CPO    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xe5 => print!("PUSH   H"),
         0xe6 => {
-            print!("ANI    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("ANI    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xe7 => print!("RST    4"),
         0xe8 => print!("RPE"),
         0xe9 => print!("PCHL"),
         0xea => {
-            print!("JPE    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JPE    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xeb => print!("XCHG"),
         0xec => {
-            print!("CPE    ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CPE    ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xee => {
-            print!("XRI    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("XRI    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xef => print!("RST    5"),
         0xf0 => print!("RP"),
         0xf1 => print!("POP    PSW"),
         0xf2 => {
-            print!("JP     ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JP     ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xf3 => print!("DI"),
         0xf4 => {
-            print!("CP     ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CP     ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xf5 => print!("PUSH   PSW"),
         0xf6 => {
-            print!("ORI    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("ORI    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xf7 => print!("RST    6"),
         0xf8 => print!("RM"),
         0xf9 => print!("SPHL"),
         0xfa => {
-            print!("JM     ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "JM     ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xfb => print!("EI"),
         0xfc => {
-            print!("CM     ${:02x}{:02x}", code_buffer[program_counter+2], code_buffer[program_counter+1]);
-            op_bytes =  3
+            print!(
+                "CM     ${:02x}{:02x}",
+                code_buffer[program_counter + 2],
+                code_buffer[program_counter + 1]
+            );
+            op_bytes = 3
         }
         0xfe => {
-            print!("CPI    #${:02x}", code_buffer[program_counter+1]);
-            op_bytes =  2
+            print!("CPI    #${:02x}", code_buffer[program_counter + 1]);
+            op_bytes = 2
         }
         0xff => print!("RST    7"),
     }
@@ -427,32 +532,36 @@ fn disassemble8080_op(code_buffer: &[u8], program_counter: usize) -> usize {
 fn unimplemented_instruction(state: &mut I8080State) {
     println!("Error: Unimplimented Instruction");
     disassemble8080_op(&state.memory, state.program_counter as usize);
-    panic!("SP: {:04x}\nInstruction: {:02x}",
-           state.stack_pointer, state.memory[state.program_counter as usize]);
+    panic!(
+        "SP: {:04x}\nInstruction: {:02x}",
+        state.stack_pointer, state.memory[state.program_counter as usize]
+    );
 }
 
+// LXI  register,d16
+// load u16 into pair of u8 registers (stored in little endian style so ffee => B=ee, C=ff)
 fn lxi_load_register_pair_immediate(state: &mut I8080State, register: RegisterSymbols) {
-    let reg_1 = state.memory[(state.program_counter+1) as usize];
-    let reg_2 = state.memory[(state.program_counter+2) as usize];
+    let reg_1 = state.memory[(state.program_counter + 1) as usize];
+    let reg_2 = state.memory[(state.program_counter + 2) as usize];
     match register {
         RegisterSymbols::B => {
             state.reg_c = reg_1;
             state.reg_b = reg_2;
-        },
+        }
         RegisterSymbols::D => {
             state.reg_e = reg_1;
             state.reg_d = reg_2;
-        },
+        }
         RegisterSymbols::H => {
             state.reg_l = reg_1;
             state.reg_h = reg_2;
-        },
+        }
         RegisterSymbols::SP => {
             state.stack_pointer = ((reg_2 as u16) << 8) | (reg_1 as u16);
-        },
-        _ => panic!("Register for LXI given is undefined")
+        }
+        _ => panic!("Register for LXI given is undefined"),
     }
-    state.program_counter += 2;
+    state.program_counter += 3;
 }
 
 fn check_parity(value: u8) -> bool {
@@ -464,6 +573,7 @@ fn check_parity(value: u8) -> bool {
 }
 
 fn add_register_add(state: &mut I8080State, register: RegisterSymbols) {
+    println!("{:04x}: ADD    {:?}", state.program_counter, register);
     let mut answer = state.reg_a as u16;
     match register {
         RegisterSymbols::B => answer += state.reg_b as u16,
@@ -477,7 +587,7 @@ fn add_register_add(state: &mut I8080State, register: RegisterSymbols) {
             let mem_loc = ((state.reg_l as u16) << 8) | (state.reg_h as u16);
             answer += state.memory[mem_loc as usize] as u16
         }
-        _ => panic!("Register for ADD given is undefined")
+        _ => panic!("Register for ADD given is undefined"),
     }
     state.flags.zero = (answer & 0xff) == 0;
     state.flags.sign = (answer & 0x80) != 0;
@@ -485,84 +595,101 @@ fn add_register_add(state: &mut I8080State, register: RegisterSymbols) {
     state.flags.parity = check_parity((answer & 0xff) as u8);
     state.flags.auxiliary_carry = (answer & 0x10) != ((state.reg_a as u16) & 0x10);
     state.reg_a = (answer & 0xff) as u8;
+
+    state.program_counter += 1;
 }
 
 fn adi_immediate_add(state: &mut I8080State) {
-    let answer = (state.reg_a as u16) + (state.memory[(state.program_counter+1) as usize] as u16);
+    println!(
+        "{:04x}: ADI    {:02x}",
+        state.program_counter,
+        state.memory[(state.program_counter + 1) as usize]
+    );
+    let answer = (state.reg_a as u16) + (state.memory[(state.program_counter + 1) as usize] as u16);
     state.flags.zero = (answer & 0xff) == 0;
     state.flags.sign = (answer & 0x80) != 0;
     state.flags.carry = answer > 0xff;
     state.flags.parity = check_parity((answer & 0xff) as u8);
     state.flags.auxiliary_carry = (answer & 0x10) != ((state.reg_a as u16) & 0x10);
     state.reg_a = (answer & 0xff) as u8;
-    state.program_counter += 1;
+
+    println!(
+        "ADI    {:02x}",
+        state.memory[(state.program_counter + 1) as usize]
+    );
+    state.program_counter += 2;
 }
 
 fn inr_increment_register(state: &mut I8080State, register: RegisterSymbols) {
+    println!("{:04x}: INR    {:?}", state.program_counter, register);
     let result = match register {
         RegisterSymbols::B => {
             state.reg_b = state.reg_b.wrapping_add(1);
             state.reg_b
-        },
+        }
         RegisterSymbols::C => {
             state.reg_c = state.reg_c.wrapping_add(1);
             state.reg_c
-        }        
+        }
         RegisterSymbols::D => {
             state.reg_d = state.reg_d.wrapping_add(1);
             state.reg_d
-        }        
+        }
         RegisterSymbols::E => {
             state.reg_e = state.reg_d.wrapping_add(1);
             state.reg_e
-        }        
+        }
         RegisterSymbols::H => {
             state.reg_h = state.reg_h.wrapping_add(1);
             state.reg_h
-        }        
+        }
         RegisterSymbols::L => {
             state.reg_l = state.reg_l.wrapping_add(1);
             state.reg_l
-        }        
+        }
         RegisterSymbols::A => {
             state.reg_a = state.reg_a.wrapping_add(1);
             state.reg_a
-        }        
+        }
         RegisterSymbols::MEMORY => {
             let mem_loc = ((state.reg_l as u16) << 8) | (state.reg_h as u16);
             state.memory[mem_loc as usize] = state.memory[mem_loc as usize].wrapping_add(1);
             state.memory[mem_loc as usize]
         }
-        _ => panic!("Register for INC given is undefined")
+        _ => panic!("Register for INC given is undefined"),
     };
     state.flags.sign = (result & 0x80) != 0;
     state.flags.zero = result == 0;
     state.flags.parity = check_parity(result & 0xff);
     state.flags.auxiliary_carry = (result & 0x10) != ((result.wrapping_sub(1)) & 0x10);
+
+    state.program_counter += 1;
 }
 
 fn inx_increment_register_pair(state: &mut I8080State, register: RegisterSymbols) {
     match register {
         RegisterSymbols::B => {
-            let val = (((state.reg_c as u16) << 8) | (state.reg_b as u16)).wrapping_add(1);
-            state.reg_c = ((val >> 8) & 0xff) as u8;
-            state.reg_b = (val & 0xff) as u8;
-        },
+            let val = (((state.reg_b as u16) << 8) | (state.reg_c as u16)).wrapping_add(1);
+            state.reg_b = ((val >> 8) & 0xff) as u8;
+            state.reg_c = (val & 0xff) as u8;
+        }
         RegisterSymbols::D => {
-            let val = (((state.reg_e as u16) << 8) | (state.reg_d as u16)).wrapping_add(1);
-            state.reg_e = ((val >> 8) & 0xff) as u8;
-            state.reg_d = (val & 0xff) as u8;
-        },
+            let val = (((state.reg_d as u16) << 8) | (state.reg_e as u16)).wrapping_add(1);
+            state.reg_d = ((val >> 8) & 0xff) as u8;
+            state.reg_e = (val & 0xff) as u8;
+        }
         RegisterSymbols::H => {
-            let val = (((state.reg_l as u16) << 8) | (state.reg_h as u16)).wrapping_add(1);
-            state.reg_l = ((val >> 8) & 0xff) as u8;
-            state.reg_h = (val & 0xff) as u8;
-        },
+            let val = (((state.reg_h as u16) << 8) | (state.reg_l as u16)).wrapping_add(1);
+            state.reg_h = ((val >> 8) & 0xff) as u8;
+            state.reg_l = (val & 0xff) as u8;
+        }
         RegisterSymbols::SP => {
             state.stack_pointer = state.stack_pointer.wrapping_add(1);
-        },
-        _ => panic!("Register for INX given is undefined")
+        }
+        _ => panic!("Register for INX given is undefined"),
     }
+
+    state.program_counter += 1;
 }
 
 fn dcr_decrement_register(state: &mut I8080State, register: RegisterSymbols) {
@@ -570,103 +697,113 @@ fn dcr_decrement_register(state: &mut I8080State, register: RegisterSymbols) {
         RegisterSymbols::B => {
             state.reg_b = state.reg_b.wrapping_sub(1);
             state.reg_b
-        },
+        }
         RegisterSymbols::C => {
             state.reg_c = state.reg_c.wrapping_sub(1);
             state.reg_c
-        }        
+        }
         RegisterSymbols::D => {
             state.reg_d = state.reg_d.wrapping_sub(1);
             state.reg_d
-        }        
+        }
         RegisterSymbols::E => {
             state.reg_e = state.reg_e.wrapping_sub(1);
             state.reg_e
-        }        
+        }
         RegisterSymbols::H => {
             state.reg_h = state.reg_h.wrapping_sub(1);
             state.reg_h
-        }        
+        }
         RegisterSymbols::L => {
             state.reg_l = state.reg_l.wrapping_sub(1);
             state.reg_l
-        }        
+        }
         RegisterSymbols::A => {
             state.reg_a = state.reg_a.wrapping_sub(1);
             state.reg_a
-        }        
+        }
         RegisterSymbols::MEMORY => {
-            let mem_loc = ((state.reg_l as u16) << 8) | (state.reg_h as u16);
+            let mem_loc = ((state.reg_h as u16) << 8) | (state.reg_l as u16);
             state.memory[mem_loc as usize] = state.memory[mem_loc as usize].wrapping_sub(1);
             state.memory[mem_loc as usize]
         }
-        _ => panic!("Register for DCR given is undefined")
+        _ => panic!("Register for DCR given is undefined"),
     };
     state.flags.sign = (result & 0x80) != 0;
     state.flags.zero = result == 0;
     state.flags.parity = check_parity(result & 0xff);
     state.flags.auxiliary_carry = (result & 0x10) != ((result.wrapping_add(1)) & 0x10);
+
+    state.program_counter += 1;
 }
 
 fn dcx_decrement_register_pair(state: &mut I8080State, register: RegisterSymbols) {
+    println!("{:04x}: DCX    {:?}", state.program_counter, register);
     match register {
         RegisterSymbols::B => {
             let val = (((state.reg_c as u16) << 8) | (state.reg_b as u16)).wrapping_sub(1);
             state.reg_c = ((val >> 8) & 0xff) as u8;
             state.reg_b = (val & 0xff) as u8;
-        },
+        }
         RegisterSymbols::D => {
             let val = (((state.reg_e as u16) << 8) | (state.reg_d as u16)).wrapping_sub(1);
             state.reg_e = ((val >> 8) & 0xff) as u8;
             state.reg_d = (val & 0xff) as u8;
-        },
+        }
         RegisterSymbols::H => {
             let val = (((state.reg_l as u16) << 8) | (state.reg_h as u16)).wrapping_sub(1);
             state.reg_l = ((val >> 8) & 0xff) as u8;
             state.reg_h = (val & 0xff) as u8;
-        },
+        }
         RegisterSymbols::SP => {
             state.stack_pointer = state.stack_pointer.wrapping_sub(1);
-        },
-        _ => panic!("Register for DCX given is undefined")
+        }
+        _ => panic!("Register for DCX given is undefined"),
     }
+
+    state.program_counter += 1;
 }
 
+// JMP  addr
+// jumps to point in address
 fn jmp_jump(state: &mut I8080State) {
-    let val1 = state.memory[(state.program_counter+2) as usize] as u16;
-    let val2 = state.memory[(state.program_counter+1) as usize] as u16;
-    state.program_counter = (val1 << 8) | val2 - 1;
+    // intel 8080 is little endian => val2 is large side
+    let val1 = state.memory[(state.program_counter + 1) as usize] as u16;
+    let val2 = state.memory[(state.program_counter + 2) as usize] as u16;
+    state.program_counter = (val2 << 8) | val1;
 }
 
 fn jnz_jump_if_not_zero(state: &mut I8080State) {
-    let val1 = state.memory[(state.program_counter+2) as usize] as u16;
-    let val2 = state.memory[(state.program_counter+1) as usize] as u16;
+    let val1 = state.memory[(state.program_counter + 1) as usize] as u16;
+    let val2 = state.memory[(state.program_counter + 2) as usize] as u16;
     if !state.flags.zero {
-        state.program_counter = (val1 << 8) | val2 - 1;
-    }
-    else {
-        state.program_counter += 2;
+        state.program_counter = (val2 << 8) | val1;
+    } else {
+        state.program_counter += 3;
     }
 }
 
 fn call_function_call(state: &mut I8080State) {
-    let ret = state.program_counter+3;
-    state.memory[(state.stack_pointer-1) as usize] = ((ret >> 8) & 0xff) as u8;
-    state.memory[(state.stack_pointer-2) as usize] = (ret & 0xff) as u8;
+    let ret = state.program_counter + 3;
+    state.memory[(state.stack_pointer - 1) as usize] = ((ret >> 8) & 0xff) as u8;
+    state.memory[(state.stack_pointer - 2) as usize] = (ret & 0xff) as u8;
     state.stack_pointer -= 2;
-    let call_to = (state.memory[(state.program_counter+2) as usize] as u16) << 8
-        | (state.memory[(state.program_counter+1) as usize] as u16);
-    state.program_counter = call_to - 1;
+    let call_to = (state.memory[(state.program_counter + 2) as usize] as u16) << 8
+        | (state.memory[(state.program_counter + 1) as usize] as u16);
+    state.program_counter = call_to;
 }
 
 fn ret_function_return(state: &mut I8080State) {
     state.program_counter = (state.memory[state.stack_pointer as usize] as u16)
-        | ((state.memory[(state.stack_pointer+1) as usize] as u16) << 8);
-    state.program_counter -= 1;
+        | ((state.memory[(state.stack_pointer + 1) as usize] as u16) << 8);
     state.stack_pointer += 2;
 }
 
-fn mov_register_move(state: &mut I8080State, register_to: RegisterSymbols, register_from: RegisterSymbols) {
+fn mov_register_move(
+    state: &mut I8080State,
+    register_to: RegisterSymbols,
+    register_from: RegisterSymbols,
+) {
     let value = match register_from {
         RegisterSymbols::B => state.reg_b,
         RegisterSymbols::C => state.reg_c,
@@ -676,10 +813,10 @@ fn mov_register_move(state: &mut I8080State, register_to: RegisterSymbols, regis
         RegisterSymbols::L => state.reg_l,
         RegisterSymbols::A => state.reg_a,
         RegisterSymbols::MEMORY => {
-            let mem_loc = (((state.reg_l as u16) << 8) | (state.reg_h as u16)) as usize;
+            let mem_loc = (((state.reg_h as u16) << 8) | (state.reg_l as u16)) as usize;
             state.memory[mem_loc]
         }
-        _ => panic!("Register for ADD given is undefined")
+        _ => panic!("Register for ADD given is undefined"),
     };
 
     match register_to {
@@ -691,15 +828,17 @@ fn mov_register_move(state: &mut I8080State, register_to: RegisterSymbols, regis
         RegisterSymbols::L => state.reg_l = value,
         RegisterSymbols::A => state.reg_a = value,
         RegisterSymbols::MEMORY => {
-            let mem_loc = (((state.reg_l as u16) << 8) | (state.reg_h as u16)) as usize;
+            let mem_loc = (((state.reg_h as u16) << 8) | (state.reg_l as u16)) as usize;
             state.memory[mem_loc] = value
         }
-        _ => panic!("Register for ADD given is undefined")
+        _ => panic!("Register for ADD given is undefined"),
     }
+
+    state.program_counter += 1;
 }
 
 fn mvi_immediate_move(state: &mut I8080State, register: RegisterSymbols) {
-    let value = state.memory[(state.program_counter+1) as usize];
+    let value = state.memory[(state.program_counter + 1) as usize];
     match register {
         RegisterSymbols::B => state.reg_b = value,
         RegisterSymbols::C => state.reg_c = value,
@@ -709,55 +848,58 @@ fn mvi_immediate_move(state: &mut I8080State, register: RegisterSymbols) {
         RegisterSymbols::L => state.reg_l = value,
         RegisterSymbols::A => state.reg_a = value,
         RegisterSymbols::MEMORY => {
-            let mem_loc = (((state.reg_l as u16) << 8) | (state.reg_h as u16)) as usize;
+            let mem_loc = (((state.reg_h as u16) << 8) | (state.reg_l as u16)) as usize;
             state.memory[mem_loc] = value
         }
-        _ => panic!("Register for ADD given is undefined")
+        _ => panic!("Register for ADD given is undefined"),
     }
-    state.program_counter += 1;
-}
 
-fn ldax_load_accumulator_indirect(state: &mut I8080State, register: RegisterSymbols) {
-    let address = match register {
-        RegisterSymbols::B => (state.reg_b as u16) | ((state.reg_c as u16) << 8),
-        RegisterSymbols::D => (state.reg_d as u16) | ((state.reg_e as u16) << 8),
-        _ => panic!("Register for LDAX given undefined")
-    };
-    match register {
-        RegisterSymbols::B => print!("BC "),
-        RegisterSymbols::D => print!("DE "),
-        _ => ()
-    }
-    println!("{:04x} {:04x}\nB={:02x} C={:02x} D={:02x} E={:02x}", address, state.program_counter,
-             state.reg_b, state.reg_c, state.reg_d, state.reg_e);
-    state.reg_a = state.memory[address as usize];
-}
-
-fn sta_store_accumulator(state: &mut I8080State) {
-    let add1 = state.memory[(state.program_counter+2) as usize] as u16;
-    let add2 = state.memory[(state.program_counter+1) as usize] as u16;
-    let address = (add1 << 8) | add2;
-    state.memory[address as usize] = state.reg_a;
     state.program_counter += 2;
 }
 
+// LDAX register
+// load the accumulator register (A) with the address in the register pair provided
+fn ldax_load_accumulator_indirect(state: &mut I8080State, register: RegisterSymbols) {
+    let address = match register {
+        RegisterSymbols::B => ((state.reg_b as u16) << 8) | (state.reg_c as u16),
+        RegisterSymbols::D => ((state.reg_d as u16) << 8) | (state.reg_e as u16),
+        _ => panic!("Register for LDAX given undefined"),
+    };
+    state.reg_a = state.memory[address as usize];
+
+    state.program_counter += 1;
+}
+
+fn sta_store_accumulator(state: &mut I8080State) {
+    println!(
+        "{:04x}: STA    {:02x}{:02x}",
+        state.program_counter,
+        state.memory[(state.program_counter + 2) as usize],
+        state.memory[(state.program_counter + 1) as usize]
+    );
+    let add1 = state.memory[(state.program_counter + 1) as usize] as u16;
+    let add2 = state.memory[(state.program_counter + 2) as usize] as u16;
+    let address = (add2 << 8) | add1;
+    state.memory[address as usize] = state.reg_a;
+    state.program_counter += 3;
+}
+
 fn cpi_compare_immediate_to_accumulator(state: &mut I8080State) {
-    let immediate = state.memory[(state.program_counter+1) as usize];
-    let result = state.reg_a.wrapping_sub(immediate);    
+    let immediate = state.memory[(state.program_counter + 1) as usize];
+    let result = state.reg_a.wrapping_sub(immediate);
     state.flags.zero = result == 0;
     state.flags.carry = (result & 0x80) >= (state.reg_a & 0x80);
     state.flags.sign = (result & 0x80) == 0x80;
     state.flags.parity = check_parity(result);
     state.flags.auxiliary_carry = (result & 0x10) >= (state.reg_a & 0x10);
+
+    state.program_counter += 2
 }
 
 fn emulate8080_op(state: &mut I8080State) {
-    if (state.program_counter as usize) >= state.memory.len() {
-        println!("PREV_OP: {:02x}, {:04x}", state.prev_op, state.program_counter);
-    }
-    state.prev_op = state.memory[state.program_counter as usize];
     match state.memory[state.program_counter as usize] {
-        0x00|0x08|0x10|0x18|0x20|0x28|0x30|0x38|0xcb|0xd9|0xdd|0xed|0xfd => (),
+        0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xcb | 0xd9 | 0xdd | 0xed
+        | 0xfd => state.program_counter += 1,
         0x01 => lxi_load_register_pair_immediate(state, RegisterSymbols::B),
         0x03 => inx_increment_register_pair(state, RegisterSymbols::B),
         0x04 => inr_increment_register(state, RegisterSymbols::B),
@@ -875,9 +1017,8 @@ fn emulate8080_op(state: &mut I8080State) {
         0xc9 => ret_function_return(state),
         0xcd => call_function_call(state),
         0xfe => cpi_compare_immediate_to_accumulator(state),
-        _ => unimplemented_instruction(state)
+        _ => unimplemented_instruction(state),
     }
-    state.program_counter += 1;
 }
 
 fn main() {
@@ -891,19 +1032,21 @@ fn main() {
             "-f" => {
                 arg_iterator += 1;
                 filename = args[arg_iterator].clone();
-            },
-            _ => panic!("Unknown flag given {}", args[arg_iterator])
+            }
+            _ => panic!("Unknown flag given {}", args[arg_iterator]),
         }
         arg_iterator += 1;
     }
     if filename == "" {
         println!("Enter ROM filename:");
-        io::stdin().read_line(&mut filename).expect("Filename not entered.");
+        io::stdin()
+            .read_line(&mut filename)
+            .expect("Filename not entered.");
         filename = filename.trim().to_string();
     }
     let mut buffer: Vec<u8> = match fs::read(filename.clone()) {
         Ok(res) => res,
-        Err(why) => panic!("Failed to open file {}: {}", filename, why)
+        Err(why) => panic!("Failed to open file {}: {}", filename, why),
     };
 
     buffer.resize(16384, 0);
@@ -931,12 +1074,11 @@ fn main() {
             sign: false,
             parity: false,
             carry: false,
-            auxiliary_carry: false
+            auxiliary_carry: false,
         },
         memory: buffer,
-        prev_op: 0
     };
-    
+
     loop {
         emulate8080_op(&mut state);
     }
