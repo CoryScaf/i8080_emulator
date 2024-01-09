@@ -36,6 +36,8 @@ struct I8080State {
     program_counter: u16,
     flags: I8080Flags,
     memory: Vec<u8>,
+    logging: bool,
+    should_exit: bool,
 }
 
 fn disassemble8080_op(code_buffer: &[u8], program_counter: usize) -> usize {
@@ -832,12 +834,27 @@ fn jnz_jump_if_not_zero(state: &mut I8080State) {
 }
 
 fn call_function_call(state: &mut I8080State) {
+    let call_to = (state.memory[(state.program_counter + 2) as usize] as u16) << 8
+        | (state.memory[(state.program_counter + 1) as usize] as u16);
+    if state.logging {
+        if call_to == 5 {
+            if state.reg_c == 9 {
+                let address = ((state.reg_d as u16) << 8) | (state.reg_e as u16);
+                let mut ind: u16 = 0;
+                while state.memory[(address + ind) as usize] as char != '$' {
+                    print!("{}", state.memory[(address + ind) as usize] as char);
+                    ind += 1;
+                }
+                println!("");
+            }
+        } else if call_to == 0 {
+            state.should_exit = true;
+        }
+    }
     let ret = state.program_counter + 3;
     state.memory[(state.stack_pointer - 1) as usize] = ((ret >> 8) & 0xff) as u8;
     state.memory[(state.stack_pointer - 2) as usize] = (ret & 0xff) as u8;
     state.stack_pointer -= 2;
-    let call_to = (state.memory[(state.program_counter + 2) as usize] as u16) << 8
-        | (state.memory[(state.program_counter + 1) as usize] as u16);
     state.program_counter = call_to;
 }
 
@@ -1150,6 +1167,7 @@ fn main() {
     let mut do_dissassemble = false;
     let mut filename = String::new();
     let mut arg_iterator = 1;
+    let mut do_log = false;
     while arg_iterator < args.len() {
         match args[arg_iterator].as_str() {
             "-d" => do_dissassemble = true,
@@ -1157,6 +1175,7 @@ fn main() {
                 arg_iterator += 1;
                 filename = args[arg_iterator].clone();
             }
+            "-l" => do_log = true,
             _ => panic!("Unknown flag given {}", args[arg_iterator]),
         }
         arg_iterator += 1;
@@ -1201,9 +1220,11 @@ fn main() {
             auxiliary_carry: false,
         },
         memory: buffer,
+        logging: do_log,
+        should_exit: false,
     };
 
-    loop {
+    while !state.should_exit {
         emulate8080_op(&mut state);
     }
 }
