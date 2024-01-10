@@ -573,19 +573,19 @@ fn lxi_load_register_pair_immediate(state: &mut I8080State, register: RegisterSy
 fn flags_to_u8(flags: &I8080Flags) -> u8 {
     let mut result: u8 = 0x02;
     if flags.sign {
-        result &= 0x80;
+        result |= 0x80;
     }
     if flags.zero {
-        result &= 0x40;
+        result |= 0x40;
     }
     if flags.auxiliary_carry {
-        result &= 0x10;
+        result |= 0x10;
     }
     if flags.parity {
-        result &= 0x04;
+        result |= 0x04;
     }
     if flags.carry {
-        result &= 0x01;
+        result |= 0x01;
     }
     return result;
 }
@@ -773,12 +773,12 @@ fn sbb_subtract_with_carry_register(state: &mut I8080State, register: RegisterSy
 // DAD reg
 // Adds register pair to register pair HL, stores in HL
 fn dad_double_add(state: &mut I8080State, register: RegisterSymbols) {
-    let hl_val = ((state.reg_h as u16) << 8) | (state.reg_l as u16);
+    let hl_val = ((state.reg_h as u32) << 8) | (state.reg_l as u32);
     let rp_val = match register {
-        RegisterSymbols::B => ((state.reg_b as u16) << 8) | (state.reg_c as u16),
-        RegisterSymbols::D => ((state.reg_d as u16) << 8) | (state.reg_e as u16),
+        RegisterSymbols::B => ((state.reg_b as u32) << 8) | (state.reg_c as u32),
+        RegisterSymbols::D => ((state.reg_d as u32) << 8) | (state.reg_e as u32),
         RegisterSymbols::H => hl_val,
-        RegisterSymbols::SP => state.stack_pointer,
+        RegisterSymbols::SP => state.stack_pointer as u32,
         _ => panic!("Register for DAD given is undefined"),
     };
 
@@ -786,24 +786,25 @@ fn dad_double_add(state: &mut I8080State, register: RegisterSymbols) {
     state.reg_h = ((result >> 8) & 0xff) as u8;
     state.reg_l = (result & 0xff) as u8;
 
+    state.flags.carry = result & 0x100 != 0;
+
     state.program_counter += 1;
 }
 
 // DAA
 // Decimal Adjust Accumulator prepares accumulator to be represented as two nibbles
 fn daa_decimal_adjust_accumulator(state: &mut I8080State) {
-    let mut lower = state.reg_a & 0x0f;
-    let mut upper = (state.reg_a & 0xf0) >> 4;
-    if lower > 9 || state.flags.auxiliary_carry {
-        lower += 6;
+    let mut result = state.reg_a;
+    let mut should_carry = false;
+    if (result & 0xf) > 9 || state.flags.auxiliary_carry {
+        result = result.wrapping_add(6);
+        should_carry = true;
     }
-    if upper > 9 || state.flags.carry {
-        upper += 6;
+    if (result >> 4) & 0xf > 9 || state.flags.carry {
+        result = result.wrapping_add(6 << 4);
     }
-    if lower > 15 {
-        state.flags.carry = true;
-    }
-    state.reg_a = ((upper & 0x0f) << 4) | (lower & 0x0f);
+    state.flags.carry = should_carry;
+    state.reg_a = result;
 
     state.program_counter += 1;
 }
@@ -935,19 +936,19 @@ fn dcr_decrement_register(state: &mut I8080State, register: RegisterSymbols) {
 fn dcx_decrement_register_pair(state: &mut I8080State, register: RegisterSymbols) {
     match register {
         RegisterSymbols::B => {
-            let val = (((state.reg_c as u16) << 8) | (state.reg_b as u16)).wrapping_sub(1);
-            state.reg_c = ((val >> 8) & 0xff) as u8;
-            state.reg_b = (val & 0xff) as u8;
+            let val = (((state.reg_b as u16) << 8) | (state.reg_c as u16)).wrapping_sub(1);
+            state.reg_b = ((val >> 8) & 0xff) as u8;
+            state.reg_c = (val & 0xff) as u8;
         }
         RegisterSymbols::D => {
-            let val = (((state.reg_e as u16) << 8) | (state.reg_d as u16)).wrapping_sub(1);
-            state.reg_e = ((val >> 8) & 0xff) as u8;
-            state.reg_d = (val & 0xff) as u8;
+            let val = (((state.reg_d as u16) << 8) | (state.reg_e as u16)).wrapping_sub(1);
+            state.reg_d = ((val >> 8) & 0xff) as u8;
+            state.reg_e = (val & 0xff) as u8;
         }
         RegisterSymbols::H => {
-            let val = (((state.reg_l as u16) << 8) | (state.reg_h as u16)).wrapping_sub(1);
-            state.reg_l = ((val >> 8) & 0xff) as u8;
-            state.reg_h = (val & 0xff) as u8;
+            let val = (((state.reg_h as u16) << 8) | (state.reg_l as u16)).wrapping_sub(1);
+            state.reg_h = ((val >> 8) & 0xff) as u8;
+            state.reg_l = (val & 0xff) as u8;
         }
         RegisterSymbols::SP => {
             state.stack_pointer = state.stack_pointer.wrapping_sub(1);
@@ -1297,9 +1298,35 @@ fn xchg_exchange_registers(state: &mut I8080State) {
     state.reg_d = state.reg_h;
     state.reg_e = state.reg_l;
     state.reg_h = tmp_d;
-    state.reg_e = tmp_e;
+    state.reg_l = tmp_e;
 
     state.program_counter += 1;
+}
+
+// SPHL
+// Load the stack pointer with the contents of H and L
+fn sphl_load_sp_from_hl(state: &mut I8080State) {
+    state.stack_pointer = ((state.reg_h as u16) << 8) | (state.reg_l as u16);
+    state.program_counter += 1;
+}
+
+// XTHL
+// Load the top of the stack with the contents of H and L
+fn xthl_exchange_top_stack_with_hl(state: &mut I8080State) {
+    let new_h = state.memory[(state.stack_pointer + 1) as usize];
+    let new_l = state.memory[state.stack_pointer as usize];
+    state.memory[(state.stack_pointer + 1) as usize] = state.reg_h;
+    state.memory[state.stack_pointer as usize] = state.reg_l;
+    state.reg_h = new_h;
+    state.reg_l = new_l;
+
+    state.program_counter += 1;
+}
+
+// PCHL
+// Load the program counter with the contents of H and L
+fn pchl_load_pc_from_hl(state: &mut I8080State) {
+    state.program_counter = ((state.reg_h as u16) << 8) | (state.reg_l as u16);
 }
 
 // LDA adr
@@ -1325,14 +1352,51 @@ fn ldax_load_accumulator_indirect(state: &mut I8080State, register: RegisterSymb
     state.program_counter += 1;
 }
 
+// LHLD adr
+// load the hl pair with value of memory at the address given
+fn lhld_load_hl_direct(state: &mut I8080State) {
+    let address = ((state.memory[(state.program_counter + 2) as usize] as u16) << 8)
+        | (state.memory[(state.program_counter + 1) as usize] as u16);
+
+    state.reg_h = state.memory[(address + 1) as usize];
+    state.reg_l = state.memory[address as usize];
+
+    state.program_counter += 3;
+}
+
+// SHLD adr
+// store the hl pair in memory at the address given
+fn shld_store_hl_direct(state: &mut I8080State) {
+    let address = ((state.memory[(state.program_counter + 2) as usize] as u16) << 8)
+        | (state.memory[(state.program_counter + 1) as usize] as u16);
+
+    state.memory[(address + 1) as usize] = state.reg_h;
+    state.memory[address as usize] = state.reg_l;
+
+    state.program_counter += 3;
+}
+
 // STA adr
-// store the accumulator into memoroy
+// store the accumulator into memory
 fn sta_store_accumulator(state: &mut I8080State) {
     let add1 = state.memory[(state.program_counter + 1) as usize] as u16;
     let add2 = state.memory[(state.program_counter + 2) as usize] as u16;
     let address = (add2 << 8) | add1;
     state.memory[address as usize] = state.reg_a;
     state.program_counter += 3;
+}
+
+// STAX reg
+// store the accumulator into memory
+fn stax_store_accumulator_indirect(state: &mut I8080State, register: RegisterSymbols) {
+    let address = match register {
+        RegisterSymbols::B => ((state.reg_b as u16) << 8) | (state.reg_c as u16),
+        RegisterSymbols::D => ((state.reg_d as u16) << 8) | (state.reg_e as u16),
+        _ => panic!("Register for STAX given undefined"),
+    };
+    state.memory[address as usize] = state.reg_a;
+
+    state.program_counter += 1;
 }
 
 // CPI d8
@@ -1381,20 +1445,20 @@ fn cmp_compare_register_to_accumulator(state: &mut I8080State, register: Registe
 fn push_add_to_stack(state: &mut I8080State, register: RegisterSymbols) {
     match register {
         RegisterSymbols::B => {
-            state.memory[(state.stack_pointer - 1) as usize] = state.reg_c;
-            state.memory[(state.stack_pointer - 2) as usize] = state.reg_b;
+            state.memory[(state.stack_pointer - 1) as usize] = state.reg_b;
+            state.memory[(state.stack_pointer - 2) as usize] = state.reg_c;
         }
         RegisterSymbols::D => {
-            state.memory[(state.stack_pointer - 1) as usize] = state.reg_e;
-            state.memory[(state.stack_pointer - 2) as usize] = state.reg_d;
+            state.memory[(state.stack_pointer - 1) as usize] = state.reg_d;
+            state.memory[(state.stack_pointer - 2) as usize] = state.reg_e;
         }
         RegisterSymbols::H => {
-            state.memory[(state.stack_pointer - 1) as usize] = state.reg_l;
-            state.memory[(state.stack_pointer - 2) as usize] = state.reg_h;
+            state.memory[(state.stack_pointer - 1) as usize] = state.reg_h;
+            state.memory[(state.stack_pointer - 2) as usize] = state.reg_l;
         }
         RegisterSymbols::PSW => {
-            state.memory[(state.stack_pointer - 1) as usize] = flags_to_u8(&state.flags);
-            state.memory[(state.stack_pointer - 2) as usize] = state.reg_a;
+            state.memory[(state.stack_pointer - 1) as usize] = state.reg_a;
+            state.memory[(state.stack_pointer - 2) as usize] = flags_to_u8(&state.flags);
         }
         _ => panic!("Register for DCX given is undefined"),
     }
@@ -1408,26 +1472,25 @@ fn push_add_to_stack(state: &mut I8080State, register: RegisterSymbols) {
 fn pop_remove_from_stack(state: &mut I8080State, register: RegisterSymbols) {
     match register {
         RegisterSymbols::B => {
-            state.reg_c = state.memory[(state.stack_pointer + 1) as usize];
-            state.reg_b = state.memory[state.stack_pointer as usize];
+            state.reg_b = state.memory[(state.stack_pointer + 1) as usize];
+            state.reg_c = state.memory[state.stack_pointer as usize];
         }
         RegisterSymbols::D => {
-            state.reg_e = state.memory[(state.stack_pointer + 1) as usize];
-            state.reg_d = state.memory[state.stack_pointer as usize];
+            state.reg_d = state.memory[(state.stack_pointer + 1) as usize];
+            state.reg_e = state.memory[state.stack_pointer as usize];
         }
         RegisterSymbols::H => {
-            state.reg_l = state.memory[(state.stack_pointer + 1) as usize];
-            state.reg_h = state.memory[state.stack_pointer as usize];
+            state.reg_h = state.memory[(state.stack_pointer + 1) as usize];
+            state.reg_l = state.memory[state.stack_pointer as usize];
         }
         RegisterSymbols::PSW => {
-            u8_to_flags(
-                &mut state.flags,
-                state.memory[(state.stack_pointer - 1) as usize],
-            );
-            state.reg_a = state.memory[state.stack_pointer as usize];
+            state.reg_a = state.memory[(state.stack_pointer + 1) as usize];
+            u8_to_flags(&mut state.flags, state.memory[state.stack_pointer as usize]);
         }
         _ => panic!("Register for POP given is undefined"),
     }
+
+    state.stack_pointer += 2;
 
     state.program_counter += 1;
 }
@@ -1583,6 +1646,69 @@ fn ana_and_register(state: &mut I8080State, register: RegisterSymbols) {
 // set the carry flag
 fn stc_set_carry_flag(state: &mut I8080State) {
     state.flags.carry = true;
+    state.program_counter += 1;
+}
+
+// CMC
+// compliment the carry flag
+fn cmc_compliment_carry(state: &mut I8080State) {
+    state.flags.carry = !state.flags.carry;
+    state.program_counter += 1;
+}
+
+// CMA
+// compliment the accumulator
+fn cma_compliment_accumulator(state: &mut I8080State) {
+    state.reg_a = !state.reg_a;
+    state.program_counter += 1;
+}
+
+// RLC
+// rotate bits left
+fn rlc_rotate_left(state: &mut I8080State) {
+    state.flags.carry = state.reg_a & 0x80 != 0;
+    let carry: u8 = match state.flags.carry {
+        true => 1,
+        false => 0,
+    };
+    state.reg_a = (state.reg_a << 1) | carry;
+    state.program_counter += 1;
+}
+
+// RRC
+// rotate bits right
+fn rrc_rotate_right(state: &mut I8080State) {
+    state.flags.carry = state.reg_a & 0x1 != 0;
+    let carry: u8 = match state.flags.carry {
+        true => 0x80,
+        false => 0,
+    };
+    state.reg_a = (state.reg_a >> 1) | carry;
+    state.program_counter += 1;
+}
+
+// RAL
+// rotate bits left through the carry bit
+fn ral_rotate_left_though_carry(state: &mut I8080State) {
+    let carry: u8 = match state.flags.carry {
+        true => 1,
+        false => 0,
+    };
+    state.flags.carry = state.reg_a & 0x80 != 0;
+    state.reg_a = (state.reg_a << 1) | carry;
+    state.program_counter += 1;
+}
+
+// RAR
+// rotate bits right through the carry bit
+fn rar_rotate_right_through_carry(state: &mut I8080State) {
+    let carry: u8 = match state.flags.carry {
+        true => 0x80,
+        false => 0,
+    };
+    state.flags.carry = state.reg_a & 0x1 != 0;
+    state.reg_a = (state.reg_a >> 1) | carry;
+    state.program_counter += 1;
 }
 
 // call appropriate function for each code
@@ -1591,38 +1717,47 @@ fn emulate8080_op(state: &mut I8080State) {
         0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xcb | 0xd9 | 0xdd | 0xed
         | 0xfd => state.program_counter += 1,
         0x01 => lxi_load_register_pair_immediate(state, RegisterSymbols::B),
+        0x02 => stax_store_accumulator_indirect(state, RegisterSymbols::B),
         0x03 => inx_increment_register_pair(state, RegisterSymbols::B),
         0x04 => inr_increment_register(state, RegisterSymbols::B),
         0x05 => dcr_decrement_register(state, RegisterSymbols::B),
         0x06 => mvi_immediate_move(state, RegisterSymbols::B),
+        0x07 => rlc_rotate_left(state),
         0x09 => dad_double_add(state, RegisterSymbols::B),
         0x0a => ldax_load_accumulator_indirect(state, RegisterSymbols::B),
         0x0b => dcx_decrement_register_pair(state, RegisterSymbols::B),
         0x0c => inr_increment_register(state, RegisterSymbols::C),
         0x0d => dcr_decrement_register(state, RegisterSymbols::C),
         0x0e => mvi_immediate_move(state, RegisterSymbols::C),
+        0x0f => rrc_rotate_right(state),
         0x11 => lxi_load_register_pair_immediate(state, RegisterSymbols::D),
+        0x12 => stax_store_accumulator_indirect(state, RegisterSymbols::D),
         0x13 => inx_increment_register_pair(state, RegisterSymbols::D),
         0x14 => inr_increment_register(state, RegisterSymbols::D),
         0x15 => dcr_decrement_register(state, RegisterSymbols::D),
         0x16 => mvi_immediate_move(state, RegisterSymbols::D),
+        0x17 => ral_rotate_left_though_carry(state),
         0x19 => dad_double_add(state, RegisterSymbols::D),
         0x1a => ldax_load_accumulator_indirect(state, RegisterSymbols::D),
         0x1b => dcx_decrement_register_pair(state, RegisterSymbols::D),
         0x1c => inr_increment_register(state, RegisterSymbols::E),
         0x1d => dcr_decrement_register(state, RegisterSymbols::E),
         0x1e => mvi_immediate_move(state, RegisterSymbols::E),
+        0x1f => rar_rotate_right_through_carry(state),
         0x21 => lxi_load_register_pair_immediate(state, RegisterSymbols::H),
+        0x22 => shld_store_hl_direct(state),
         0x23 => inx_increment_register_pair(state, RegisterSymbols::H),
         0x24 => inr_increment_register(state, RegisterSymbols::H),
         0x25 => dcr_decrement_register(state, RegisterSymbols::H),
         0x26 => mvi_immediate_move(state, RegisterSymbols::H),
         0x27 => daa_decimal_adjust_accumulator(state),
         0x29 => dad_double_add(state, RegisterSymbols::H),
+        0x2a => lhld_load_hl_direct(state),
         0x2b => dcx_decrement_register_pair(state, RegisterSymbols::H),
         0x2c => inr_increment_register(state, RegisterSymbols::L),
         0x2d => dcr_decrement_register(state, RegisterSymbols::L),
         0x2e => mvi_immediate_move(state, RegisterSymbols::L),
+        0x2f => cma_compliment_accumulator(state),
         0x31 => lxi_load_register_pair_immediate(state, RegisterSymbols::SP),
         0x32 => sta_store_accumulator(state),
         0x33 => inx_increment_register_pair(state, RegisterSymbols::SP),
@@ -1636,6 +1771,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0x3c => inr_increment_register(state, RegisterSymbols::A),
         0x3d => dcr_decrement_register(state, RegisterSymbols::A),
         0x3e => mvi_immediate_move(state, RegisterSymbols::A),
+        0x3f => cmc_compliment_carry(state),
         0x40 => mov_register_move(state, RegisterSymbols::B, RegisterSymbols::B),
         0x41 => mov_register_move(state, RegisterSymbols::B, RegisterSymbols::C),
         0x42 => mov_register_move(state, RegisterSymbols::B, RegisterSymbols::D),
@@ -1788,12 +1924,14 @@ fn emulate8080_op(state: &mut I8080State) {
         0xdc => cc_call_if_carry(state),
         0xde => sbi_subtract_with_carry_immediate(state),
         0xe0 => rpo_return_if_parity_odd(state),
-        0xe1 => pop_remove_from_stack(state, RegisterSymbols::D),
+        0xe1 => pop_remove_from_stack(state, RegisterSymbols::H),
         0xe2 => jpo_jump_if_parity_odd(state),
+        0xe3 => xthl_exchange_top_stack_with_hl(state),
         0xe4 => cpo_call_if_parity_odd(state),
         0xe5 => push_add_to_stack(state, RegisterSymbols::H),
         0xe6 => ani_and_immediate(state),
         0xe8 => rpe_return_if_parity_even(state),
+        0xe9 => pchl_load_pc_from_hl(state),
         0xea => jpe_jump_if_parity_even(state),
         0xeb => xchg_exchange_registers(state),
         0xec => cpe_call_if_parity_even(state),
@@ -1806,6 +1944,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0xf5 => push_add_to_stack(state, RegisterSymbols::PSW),
         0xf6 => ori_inclusive_or_immediate(state),
         0xf8 => rm_return_if_minus(state),
+        0xf9 => sphl_load_sp_from_hl(state),
         0xfa => jm_jump_if_minus(state),
         0xfb => ei_enable_interrupts(state),
         0xfc => cm_call_if_minus(state),
@@ -1893,16 +2032,7 @@ fn main() {
         state.memory[0x05] = 0xc9; // make sure it returns
 
         // start testing loop which adds special calls
-        let mut count = 0;
         while !state.should_exit {
-            if count >= 390 {
-                disassemble8080_op(&mut state.memory, state.program_counter as usize);
-                /*println!(
-                    "A: {:02x}, M: {:02x}",
-                    state.reg_a,
-                    state.memory[(((state.reg_h as u16) << 8) | (state.reg_l as u16)) as usize]
-                );*/
-            }
             if state.program_counter == 5 {
                 if state.reg_c == 9 {
                     let address = ((state.reg_d as u16) << 8) | (state.reg_e as u16);
@@ -1920,10 +2050,6 @@ fn main() {
             emulate8080_op(&mut state);
             if state.program_counter == 0 {
                 println!("JMP to 0 from {:04x}", prev_pc);
-                state.should_exit = true;
-            }
-            count += 1;
-            if count > 420 {
                 state.should_exit = true;
             }
         }
