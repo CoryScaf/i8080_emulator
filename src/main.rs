@@ -22,6 +22,7 @@ struct I8080Flags {
     parity: bool,
     carry: bool,
     auxiliary_carry: bool,
+    interrupts_enabled: bool,
 }
 
 struct I8080State {
@@ -36,10 +37,11 @@ struct I8080State {
     program_counter: u16,
     flags: I8080Flags,
     memory: Vec<u8>,
-    logging: bool,
+    testing: bool,
     should_exit: bool,
 }
 
+// convert codes to names and print it out
 fn disassemble8080_op(code_buffer: &[u8], program_counter: usize) -> usize {
     let mut op_bytes = 1;
     print!("{:04x} ", program_counter);
@@ -567,6 +569,7 @@ fn lxi_load_register_pair_immediate(state: &mut I8080State, register: RegisterSy
     state.program_counter += 3;
 }
 
+// flags order in as a d8 is SZ0A0P1C
 fn flags_to_u8(flags: &I8080Flags) -> u8 {
     let mut result: u8 = 0x02;
     if flags.sign {
@@ -595,6 +598,7 @@ fn u8_to_flags(flags: &mut I8080Flags, value: u8) {
     flags.carry = value & 0x01 != 0;
 }
 
+// check if number of set bits are even
 fn check_parity(value: u8) -> bool {
     let mut result = 0;
     for i in 0..8 {
@@ -603,8 +607,9 @@ fn check_parity(value: u8) -> bool {
     return (result % 2) == 0;
 }
 
+// ADD reg
+// Add given register to register A
 fn add_register_add(state: &mut I8080State, register: RegisterSymbols) {
-    println!("{:04x}: ADD    {:?}", state.program_counter, register);
     let mut answer = state.reg_a as u16;
     match register {
         RegisterSymbols::B => answer += state.reg_b as u16,
@@ -630,12 +635,9 @@ fn add_register_add(state: &mut I8080State, register: RegisterSymbols) {
     state.program_counter += 1;
 }
 
+// ADI reg
+// Add immediate to register A
 fn adi_immediate_add(state: &mut I8080State) {
-    println!(
-        "{:04x}: ADI    {:02x}",
-        state.program_counter,
-        state.memory[(state.program_counter + 1) as usize]
-    );
     let answer = (state.reg_a as u16) + (state.memory[(state.program_counter + 1) as usize] as u16);
     state.flags.zero = (answer & 0xff) == 0;
     state.flags.sign = (answer & 0x80) != 0;
@@ -651,7 +653,7 @@ fn adi_immediate_add(state: &mut I8080State) {
     state.program_counter += 2;
 }
 
-// DAD register
+// DAD reg
 // Adds register pair to register pair HL, stores in HL
 fn dad_double_add(state: &mut I8080State, register: RegisterSymbols) {
     let hl_val = ((state.reg_h as u16) << 8) | (state.reg_l as u16);
@@ -670,8 +672,28 @@ fn dad_double_add(state: &mut I8080State, register: RegisterSymbols) {
     state.program_counter += 1;
 }
 
+// DAA
+// Decimal Adjust Accumulator prepares accumulator to be represented as two nibbles
+fn daa_decimal_adjust_accumulator(state: &mut I8080State) {
+    let mut lower = state.reg_a & 0x0f;
+    let mut upper = (state.reg_a & 0xf0) >> 4;
+    if lower > 9 || state.flags.auxiliary_carry {
+        lower += 6;
+    }
+    if upper > 9 || state.flags.carry {
+        upper += 6;
+    }
+    if lower > 15 {
+        state.flags.carry = true;
+    }
+    state.reg_a = ((upper & 0x0f) << 4) | (lower & 0x0f);
+
+    state.program_counter += 1;
+}
+
+// INR reg
+// increment given register by 1
 fn inr_increment_register(state: &mut I8080State, register: RegisterSymbols) {
-    println!("{:04x}: INR    {:?}", state.program_counter, register);
     let result = match register {
         RegisterSymbols::B => {
             state.reg_b = state.reg_b.wrapping_add(1);
@@ -716,6 +738,8 @@ fn inr_increment_register(state: &mut I8080State, register: RegisterSymbols) {
     state.program_counter += 1;
 }
 
+// INX reg
+// increment given register pair by 1
 fn inx_increment_register_pair(state: &mut I8080State, register: RegisterSymbols) {
     match register {
         RegisterSymbols::B => {
@@ -742,6 +766,8 @@ fn inx_increment_register_pair(state: &mut I8080State, register: RegisterSymbols
     state.program_counter += 1;
 }
 
+// DCR reg
+// decrement given register by 1
 fn dcr_decrement_register(state: &mut I8080State, register: RegisterSymbols) {
     let result = match register {
         RegisterSymbols::B => {
@@ -787,8 +813,9 @@ fn dcr_decrement_register(state: &mut I8080State, register: RegisterSymbols) {
     state.program_counter += 1;
 }
 
+// DCX reg
+// decrement given register pair by 1
 fn dcx_decrement_register_pair(state: &mut I8080State, register: RegisterSymbols) {
-    println!("{:04x}: DCX    {:?}", state.program_counter, register);
     match register {
         RegisterSymbols::B => {
             let val = (((state.reg_c as u16) << 8) | (state.reg_b as u16)).wrapping_sub(1);
@@ -814,7 +841,7 @@ fn dcx_decrement_register_pair(state: &mut I8080State, register: RegisterSymbols
     state.program_counter += 1;
 }
 
-// JMP  addr
+// JMP  adr
 // jumps to point in address
 fn jmp_jump(state: &mut I8080State) {
     // intel 8080 is little endian => val2 is large side
@@ -823,34 +850,81 @@ fn jmp_jump(state: &mut I8080State) {
     state.program_counter = (val2 << 8) | val1;
 }
 
+// JNZ adr
+// jumps to address if zero flag not set
 fn jnz_jump_if_not_zero(state: &mut I8080State) {
-    let val1 = state.memory[(state.program_counter + 1) as usize] as u16;
-    let val2 = state.memory[(state.program_counter + 2) as usize] as u16;
     if !state.flags.zero {
-        state.program_counter = (val2 << 8) | val1;
+        jmp_jump(state);
     } else {
         state.program_counter += 3;
     }
 }
 
+// JZ adr
+// jumps to address if zero flag set
+fn jz_jump_if_zero(state: &mut I8080State) {
+    if state.flags.zero {
+        jmp_jump(state);
+    } else {
+        state.program_counter += 3;
+    }
+}
+
+// JPE adr
+// jumps to address if parity flag set
+fn jpe_jump_if_parity_even(state: &mut I8080State) {
+    if state.flags.parity {
+        jmp_jump(state);
+    } else {
+        state.program_counter += 3;
+    }
+}
+
+// JPO adr
+// jumps to address if parity flag not set
+fn jpo_jump_if_parity_odd(state: &mut I8080State) {
+    if !state.flags.parity {
+        jmp_jump(state);
+    } else {
+        state.program_counter += 3;
+    }
+}
+
+// JNC adr
+// jumps to address if carry flag not set
+fn jnc_jump_if_no_carry(state: &mut I8080State) {
+    if !state.flags.carry {
+        jmp_jump(state);
+    } else {
+        state.program_counter += 3;
+    }
+}
+
+// JA adr
+// Jump if both carry and zero flags are cleared
+fn ja_jump_if_above(state: &mut I8080State) {
+    if !state.flags.carry && !state.flags.zero {
+        jmp_jump(state);
+    } else {
+        state.program_counter += 3;
+    }
+}
+
+// JM adr
+// Jump to address if sign flag set
+fn jm_jump_if_minus(state: &mut I8080State) {
+    if state.flags.sign {
+        jmp_jump(state);
+    } else {
+        state.program_counter += 3;
+    }
+}
+
+// CALL adr
+// jump to address and set return point at stack pointer
 fn call_function_call(state: &mut I8080State) {
     let call_to = (state.memory[(state.program_counter + 2) as usize] as u16) << 8
         | (state.memory[(state.program_counter + 1) as usize] as u16);
-    if state.logging {
-        if call_to == 5 {
-            if state.reg_c == 9 {
-                let address = ((state.reg_d as u16) << 8) | (state.reg_e as u16);
-                let mut ind: u16 = 0;
-                while state.memory[(address + ind) as usize] as char != '$' {
-                    print!("{}", state.memory[(address + ind) as usize] as char);
-                    ind += 1;
-                }
-                println!("");
-            }
-        } else if call_to == 0 {
-            state.should_exit = true;
-        }
-    }
     let ret = state.program_counter + 3;
     state.memory[(state.stack_pointer - 1) as usize] = ((ret >> 8) & 0xff) as u8;
     state.memory[(state.stack_pointer - 2) as usize] = (ret & 0xff) as u8;
@@ -858,12 +932,16 @@ fn call_function_call(state: &mut I8080State) {
     state.program_counter = call_to;
 }
 
+// RET
+// return to last address in the stack
 fn ret_function_return(state: &mut I8080State) {
     state.program_counter = (state.memory[state.stack_pointer as usize] as u16)
         | ((state.memory[(state.stack_pointer + 1) as usize] as u16) << 8);
     state.stack_pointer += 2;
 }
 
+// MOV reg,reg
+// move contents of second register to first register given
 fn mov_register_move(
     state: &mut I8080State,
     register_to: RegisterSymbols,
@@ -902,6 +980,8 @@ fn mov_register_move(
     state.program_counter += 1;
 }
 
+// MOV reg,d8
+// move immediate value to register given
 fn mvi_immediate_move(state: &mut I8080State, register: RegisterSymbols) {
     let value = state.memory[(state.program_counter + 1) as usize];
     match register {
@@ -935,7 +1015,17 @@ fn xchg_exchange_registers(state: &mut I8080State) {
     state.program_counter += 1;
 }
 
-// LDAX register
+// LDA adr
+// load the accumulator from memory
+fn lda_load_accumulator_direct(state: &mut I8080State) {
+    let address = ((state.memory[(state.program_counter + 2) as usize] as u16) << 8)
+        | (state.memory[(state.program_counter + 1) as usize] as u16);
+    state.reg_a = state.memory[address as usize];
+
+    state.program_counter += 3;
+}
+
+// LDAX reg
 // load the accumulator register (A) with the address in the register pair provided
 fn ldax_load_accumulator_indirect(state: &mut I8080State, register: RegisterSymbols) {
     let address = match register {
@@ -948,13 +1038,9 @@ fn ldax_load_accumulator_indirect(state: &mut I8080State, register: RegisterSymb
     state.program_counter += 1;
 }
 
+// STA adr
+// store the accumulator into memoroy
 fn sta_store_accumulator(state: &mut I8080State) {
-    println!(
-        "{:04x}: STA    {:02x}{:02x}",
-        state.program_counter,
-        state.memory[(state.program_counter + 2) as usize],
-        state.memory[(state.program_counter + 1) as usize]
-    );
     let add1 = state.memory[(state.program_counter + 1) as usize] as u16;
     let add2 = state.memory[(state.program_counter + 2) as usize] as u16;
     let address = (add2 << 8) | add1;
@@ -962,6 +1048,8 @@ fn sta_store_accumulator(state: &mut I8080State) {
     state.program_counter += 3;
 }
 
+// CPI d8
+// Compare accumulator with immediate value by subtracting
 fn cpi_compare_immediate_to_accumulator(state: &mut I8080State) {
     let immediate = state.memory[(state.program_counter + 1) as usize];
     let result = state.reg_a.wrapping_sub(immediate);
@@ -974,6 +1062,8 @@ fn cpi_compare_immediate_to_accumulator(state: &mut I8080State) {
     state.program_counter += 2
 }
 
+// PUSH reg
+// push register pair to next point in stack
 fn push_add_to_stack(state: &mut I8080State, register: RegisterSymbols) {
     match register {
         RegisterSymbols::B => {
@@ -999,6 +1089,8 @@ fn push_add_to_stack(state: &mut I8080State, register: RegisterSymbols) {
     state.program_counter += 1;
 }
 
+// POP reg
+// pop last value off the stack and put it into register
 fn pop_remove_from_stack(state: &mut I8080State, register: RegisterSymbols) {
     match register {
         RegisterSymbols::B => {
@@ -1022,8 +1114,100 @@ fn pop_remove_from_stack(state: &mut I8080State, register: RegisterSymbols) {
         }
         _ => panic!("Register for POP given is undefined"),
     }
+
+    state.program_counter += 1;
 }
 
+// HLT
+// stop the program
+fn hlt_halt(state: &mut I8080State) {
+    println!("Halting at PC: {:04x}", state.program_counter);
+    state.should_exit = true;
+}
+
+// DI
+// disable interrupts (e.g. io)
+fn di_disable_interrupts(state: &mut I8080State) {
+    state.flags.interrupts_enabled = false;
+    state.program_counter += 1;
+}
+
+// EI
+// enable interrupts (e.g. io)
+fn ei_enable_interrupts(state: &mut I8080State) {
+    state.flags.interrupts_enabled = true;
+    state.program_counter += 1;
+}
+
+// XRA reg
+// exclusive or (^) with accumulator and given register
+fn xra_exclusive_or_accumulator(state: &mut I8080State, register: RegisterSymbols) {
+    state.reg_a = match register {
+        RegisterSymbols::B => state.reg_a ^ state.reg_b,
+        RegisterSymbols::C => state.reg_a ^ state.reg_c,
+        RegisterSymbols::D => state.reg_a ^ state.reg_d,
+        RegisterSymbols::E => state.reg_a ^ state.reg_e,
+        RegisterSymbols::H => state.reg_a ^ state.reg_h,
+        RegisterSymbols::L => state.reg_a ^ state.reg_l,
+        RegisterSymbols::A => 0,
+        RegisterSymbols::MEMORY => {
+            let address = ((state.reg_h as u16) << 8) | (state.reg_l as u16);
+            state.reg_a ^ state.memory[address as usize]
+        }
+        _ => panic!("Register for XRA given is undefined"),
+    };
+    state.flags.zero = state.reg_a == 0;
+    state.flags.sign = state.reg_a & 0x80 != 0;
+    state.flags.parity = check_parity(state.reg_a);
+    state.flags.carry = false;
+    state.flags.auxiliary_carry = false;
+
+    state.program_counter += 1;
+}
+
+// ORA reg
+// inclusive or (|) with accumulator and give register
+fn ora_inclusive_or_accumulator(state: &mut I8080State, register: RegisterSymbols) {
+    state.reg_a = match register {
+        RegisterSymbols::B => state.reg_a | state.reg_b,
+        RegisterSymbols::C => state.reg_a | state.reg_c,
+        RegisterSymbols::D => state.reg_a | state.reg_d,
+        RegisterSymbols::E => state.reg_a | state.reg_e,
+        RegisterSymbols::H => state.reg_a | state.reg_h,
+        RegisterSymbols::L => state.reg_a | state.reg_l,
+        RegisterSymbols::A => 0,
+        RegisterSymbols::MEMORY => {
+            let address = ((state.reg_h as u16) << 8) | (state.reg_l as u16);
+            state.reg_a | state.memory[address as usize]
+        }
+        _ => panic!("Register for ORA given is undefined"),
+    };
+    state.flags.zero = state.reg_a == 0;
+    state.flags.sign = state.reg_a & 0x80 != 0;
+    state.flags.parity = check_parity(state.reg_a);
+    state.flags.carry = false;
+    state.flags.auxiliary_carry = false;
+
+    state.program_counter += 1;
+}
+
+// ANI d8
+// And between accumulator and immediate value
+fn ani_and_immediate(state: &mut I8080State) {
+    let immediate = state.memory[(state.program_counter + 1) as usize];
+    let result = state.reg_a & immediate;
+    state.flags.zero = result == 0;
+    state.flags.sign = (result & 0x80) != 0;
+    state.flags.parity = check_parity(result);
+    state.flags.carry = false;
+    state.flags.auxiliary_carry = (result & 0x10) > (state.reg_a & 0x10);
+
+    state.reg_a = result;
+
+    state.program_counter += 2;
+}
+
+// call appropriate function for each code
 fn emulate8080_op(state: &mut I8080State) {
     match state.memory[state.program_counter as usize] {
         0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xcb | 0xd9 | 0xdd | 0xed
@@ -1055,6 +1239,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0x24 => inr_increment_register(state, RegisterSymbols::H),
         0x25 => dcr_decrement_register(state, RegisterSymbols::H),
         0x26 => mvi_immediate_move(state, RegisterSymbols::H),
+        0x27 => daa_decimal_adjust_accumulator(state),
         0x29 => dad_double_add(state, RegisterSymbols::H),
         0x2b => dcx_decrement_register_pair(state, RegisterSymbols::H),
         0x2c => inr_increment_register(state, RegisterSymbols::L),
@@ -1067,6 +1252,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0x35 => dcr_decrement_register(state, RegisterSymbols::MEMORY),
         0x36 => mvi_immediate_move(state, RegisterSymbols::MEMORY),
         0x39 => dad_double_add(state, RegisterSymbols::SP),
+        0x3a => lda_load_accumulator_direct(state),
         0x3b => dcx_decrement_register_pair(state, RegisterSymbols::SP),
         0x3c => inr_increment_register(state, RegisterSymbols::A),
         0x3d => dcr_decrement_register(state, RegisterSymbols::A),
@@ -1125,7 +1311,7 @@ fn emulate8080_op(state: &mut I8080State) {
         0x73 => mov_register_move(state, RegisterSymbols::MEMORY, RegisterSymbols::E),
         0x74 => mov_register_move(state, RegisterSymbols::MEMORY, RegisterSymbols::H),
         0x75 => mov_register_move(state, RegisterSymbols::MEMORY, RegisterSymbols::L),
-
+        0x76 => hlt_halt(state),
         0x77 => mov_register_move(state, RegisterSymbols::MEMORY, RegisterSymbols::A),
         0x78 => mov_register_move(state, RegisterSymbols::A, RegisterSymbols::B),
         0x79 => mov_register_move(state, RegisterSymbols::A, RegisterSymbols::C),
@@ -1143,20 +1329,46 @@ fn emulate8080_op(state: &mut I8080State) {
         0x85 => add_register_add(state, RegisterSymbols::L),
         0x86 => add_register_add(state, RegisterSymbols::MEMORY),
         0x87 => add_register_add(state, RegisterSymbols::A),
+        0xa8 => xra_exclusive_or_accumulator(state, RegisterSymbols::B),
+        0xa9 => xra_exclusive_or_accumulator(state, RegisterSymbols::C),
+        0xaa => xra_exclusive_or_accumulator(state, RegisterSymbols::D),
+        0xab => xra_exclusive_or_accumulator(state, RegisterSymbols::E),
+        0xac => xra_exclusive_or_accumulator(state, RegisterSymbols::H),
+        0xad => xra_exclusive_or_accumulator(state, RegisterSymbols::L),
+        0xae => xra_exclusive_or_accumulator(state, RegisterSymbols::MEMORY),
+        0xaf => xra_exclusive_or_accumulator(state, RegisterSymbols::A),
+        0xb0 => ora_inclusive_or_accumulator(state, RegisterSymbols::B),
+        0xb1 => ora_inclusive_or_accumulator(state, RegisterSymbols::C),
+        0xb2 => ora_inclusive_or_accumulator(state, RegisterSymbols::D),
+        0xb3 => ora_inclusive_or_accumulator(state, RegisterSymbols::E),
+        0xb4 => ora_inclusive_or_accumulator(state, RegisterSymbols::H),
+        0xb5 => ora_inclusive_or_accumulator(state, RegisterSymbols::L),
+        0xb6 => ora_inclusive_or_accumulator(state, RegisterSymbols::MEMORY),
+        0xb7 => ora_inclusive_or_accumulator(state, RegisterSymbols::A),
         0xc1 => pop_remove_from_stack(state, RegisterSymbols::B),
         0xc2 => jnz_jump_if_not_zero(state),
         0xc3 => jmp_jump(state),
         0xc5 => push_add_to_stack(state, RegisterSymbols::B),
         0xc6 => adi_immediate_add(state),
         0xc9 => ret_function_return(state),
+        0xca => jz_jump_if_zero(state),
         0xcd => call_function_call(state),
         0xd1 => pop_remove_from_stack(state, RegisterSymbols::D),
+        0xd2 => jnc_jump_if_no_carry(state),
         0xd5 => push_add_to_stack(state, RegisterSymbols::D),
+        0xda => ja_jump_if_above(state),
         0xe1 => pop_remove_from_stack(state, RegisterSymbols::D),
+        0xe2 => jpo_jump_if_parity_odd(state),
         0xe5 => push_add_to_stack(state, RegisterSymbols::H),
+        0xe6 => ani_and_immediate(state),
+        0xea => jpe_jump_if_parity_even(state),
         0xeb => xchg_exchange_registers(state),
-        0xf1 => pop_remove_from_stack(state, RegisterSymbols::SP),
+        0xf1 => pop_remove_from_stack(state, RegisterSymbols::PSW),
+        0xf2 => jpe_jump_if_parity_even(state),
+        0xf3 => di_disable_interrupts(state),
         0xf5 => push_add_to_stack(state, RegisterSymbols::PSW),
+        0xfa => jm_jump_if_minus(state),
+        0xfb => ei_enable_interrupts(state),
         0xfe => cpi_compare_immediate_to_accumulator(state),
         _ => unimplemented_instruction(state),
     }
@@ -1167,7 +1379,7 @@ fn main() {
     let mut do_dissassemble = false;
     let mut filename = String::new();
     let mut arg_iterator = 1;
-    let mut do_log = false;
+    let mut do_test = false;
     while arg_iterator < args.len() {
         match args[arg_iterator].as_str() {
             "-d" => do_dissassemble = true,
@@ -1175,7 +1387,7 @@ fn main() {
                 arg_iterator += 1;
                 filename = args[arg_iterator].clone();
             }
-            "-l" => do_log = true,
+            "-t" => do_test = true,
             _ => panic!("Unknown flag given {}", args[arg_iterator]),
         }
         arg_iterator += 1;
@@ -1192,7 +1404,7 @@ fn main() {
         Err(why) => panic!("Failed to open file {}: {}", filename, why),
     };
 
-    buffer.resize(16384, 0);
+    buffer.resize(0x10000, 0);
 
     if do_dissassemble {
         let mut program_counter = 0;
@@ -1218,11 +1430,51 @@ fn main() {
             parity: false,
             carry: false,
             auxiliary_carry: false,
+            interrupts_enabled: true,
         },
         memory: buffer,
-        logging: do_log,
+        testing: do_test,
         should_exit: false,
     };
+
+    if state.testing {
+        // provided test needs to start at 0x100
+        state.memory.rotate_right(0x100);
+
+        // jump to 0x100
+        state.memory[0x00] = 0xc3;
+        state.memory[0x01] = 0x00;
+        state.memory[0x02] = 0x01;
+
+        // fix stack pointer location since starts at 0x100
+        state.memory[0x170] = 0x07;
+
+        // change 0x05 to ret since it is a print call
+        state.memory[0x05] = 0xc9; // make sure it returns
+
+        // start testing loop which adds special calls
+        while !state.should_exit {
+            if state.program_counter == 5 {
+                if state.reg_c == 9 {
+                    let address = ((state.reg_d as u16) << 8) | (state.reg_e as u16);
+                    let mut ind: u16 = 0;
+                    while state.memory[(address + ind) as usize] as char != '$' {
+                        print!("{}", state.memory[(address + ind) as usize] as char);
+                        ind += 1;
+                    }
+                    println!("");
+                } else if state.reg_c == 2 {
+                    println!("{}", state.reg_e as char);
+                }
+            }
+            let prev_pc = state.program_counter;
+            emulate8080_op(&mut state);
+            if state.program_counter == 0 {
+                println!("JMP to 0 from {:04x}", prev_pc);
+                state.should_exit = true;
+            }
+        }
+    }
 
     while !state.should_exit {
         emulate8080_op(&mut state);
