@@ -1,284 +1,152 @@
 mod disassemble;
+mod emulate8080;
 mod i8080;
+mod shaders;
 
 use std::env;
 use std::fs;
 use std::io;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-// call appropriate function for each code
-fn emulate8080_op(state: &mut i8080::State) {
-    match state.memory[state.program_counter as usize] {
-        0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xcb | 0xd9 | 0xdd | 0xed
-        | 0xfd => state.program_counter += 1,
-        0x01 => state.lxi_load_register_pair_immediate(i8080::RegisterSymbols::B),
-        0x02 => state.stax_store_accumulator_indirect(i8080::RegisterSymbols::B),
-        0x03 => state.inx_increment_register_pair(i8080::RegisterSymbols::B),
-        0x04 => state.inr_increment_register(i8080::RegisterSymbols::B),
-        0x05 => state.dcr_decrement_register(i8080::RegisterSymbols::B),
-        0x06 => state.mvi_immediate_move(i8080::RegisterSymbols::B),
-        0x07 => state.rlc_rotate_left(),
-        0x09 => state.dad_double_add(i8080::RegisterSymbols::B),
-        0x0a => state.ldax_load_accumulator_indirect(i8080::RegisterSymbols::B),
-        0x0b => state.dcx_decrement_register_pair(i8080::RegisterSymbols::B),
-        0x0c => state.inr_increment_register(i8080::RegisterSymbols::C),
-        0x0d => state.dcr_decrement_register(i8080::RegisterSymbols::C),
-        0x0e => state.mvi_immediate_move(i8080::RegisterSymbols::C),
-        0x0f => state.rrc_rotate_right(),
-        0x11 => state.lxi_load_register_pair_immediate(i8080::RegisterSymbols::D),
-        0x12 => state.stax_store_accumulator_indirect(i8080::RegisterSymbols::D),
-        0x13 => state.inx_increment_register_pair(i8080::RegisterSymbols::D),
-        0x14 => state.inr_increment_register(i8080::RegisterSymbols::D),
-        0x15 => state.dcr_decrement_register(i8080::RegisterSymbols::D),
-        0x16 => state.mvi_immediate_move(i8080::RegisterSymbols::D),
-        0x17 => state.ral_rotate_left_though_carry(),
-        0x19 => state.dad_double_add(i8080::RegisterSymbols::D),
-        0x1a => state.ldax_load_accumulator_indirect(i8080::RegisterSymbols::D),
-        0x1b => state.dcx_decrement_register_pair(i8080::RegisterSymbols::D),
-        0x1c => state.inr_increment_register(i8080::RegisterSymbols::E),
-        0x1d => state.dcr_decrement_register(i8080::RegisterSymbols::E),
-        0x1e => state.mvi_immediate_move(i8080::RegisterSymbols::E),
-        0x1f => state.rar_rotate_right_through_carry(),
-        0x21 => state.lxi_load_register_pair_immediate(i8080::RegisterSymbols::H),
-        0x22 => state.shld_store_hl_direct(),
-        0x23 => state.inx_increment_register_pair(i8080::RegisterSymbols::H),
-        0x24 => state.inr_increment_register(i8080::RegisterSymbols::H),
-        0x25 => state.dcr_decrement_register(i8080::RegisterSymbols::H),
-        0x26 => state.mvi_immediate_move(i8080::RegisterSymbols::H),
-        0x27 => state.daa_decimal_adjust_accumulator(),
-        0x29 => state.dad_double_add(i8080::RegisterSymbols::H),
-        0x2a => state.lhld_load_hl_direct(),
-        0x2b => state.dcx_decrement_register_pair(i8080::RegisterSymbols::H),
-        0x2c => state.inr_increment_register(i8080::RegisterSymbols::L),
-        0x2d => state.dcr_decrement_register(i8080::RegisterSymbols::L),
-        0x2e => state.mvi_immediate_move(i8080::RegisterSymbols::L),
-        0x2f => state.cma_compliment_accumulator(),
-        0x31 => state.lxi_load_register_pair_immediate(i8080::RegisterSymbols::SP),
-        0x32 => state.sta_store_accumulator(),
-        0x33 => state.inx_increment_register_pair(i8080::RegisterSymbols::SP),
-        0x34 => state.inr_increment_register(i8080::RegisterSymbols::MEMORY),
-        0x35 => state.dcr_decrement_register(i8080::RegisterSymbols::MEMORY),
-        0x36 => state.mvi_immediate_move(i8080::RegisterSymbols::MEMORY),
-        0x37 => state.stc_set_carry_flag(),
-        0x39 => state.dad_double_add(i8080::RegisterSymbols::SP),
-        0x3a => state.lda_load_accumulator_direct(),
-        0x3b => state.dcx_decrement_register_pair(i8080::RegisterSymbols::SP),
-        0x3c => state.inr_increment_register(i8080::RegisterSymbols::A),
-        0x3d => state.dcr_decrement_register(i8080::RegisterSymbols::A),
-        0x3e => state.mvi_immediate_move(i8080::RegisterSymbols::A),
-        0x3f => state.cmc_compliment_carry(),
-        0x40 => state.mov_register_move(i8080::RegisterSymbols::B, i8080::RegisterSymbols::B),
-        0x41 => state.mov_register_move(i8080::RegisterSymbols::B, i8080::RegisterSymbols::C),
-        0x42 => state.mov_register_move(i8080::RegisterSymbols::B, i8080::RegisterSymbols::D),
-        0x43 => state.mov_register_move(i8080::RegisterSymbols::B, i8080::RegisterSymbols::E),
-        0x44 => state.mov_register_move(i8080::RegisterSymbols::B, i8080::RegisterSymbols::H),
-        0x45 => state.mov_register_move(i8080::RegisterSymbols::B, i8080::RegisterSymbols::L),
-        0x46 => state.mov_register_move(i8080::RegisterSymbols::B, i8080::RegisterSymbols::MEMORY),
-        0x47 => state.mov_register_move(i8080::RegisterSymbols::B, i8080::RegisterSymbols::A),
-        0x48 => state.mov_register_move(i8080::RegisterSymbols::C, i8080::RegisterSymbols::B),
-        0x49 => state.mov_register_move(i8080::RegisterSymbols::C, i8080::RegisterSymbols::C),
-        0x4a => state.mov_register_move(i8080::RegisterSymbols::C, i8080::RegisterSymbols::D),
-        0x4b => state.mov_register_move(i8080::RegisterSymbols::C, i8080::RegisterSymbols::E),
-        0x4c => state.mov_register_move(i8080::RegisterSymbols::C, i8080::RegisterSymbols::H),
-        0x4d => state.mov_register_move(i8080::RegisterSymbols::C, i8080::RegisterSymbols::L),
-        0x4e => state.mov_register_move(i8080::RegisterSymbols::C, i8080::RegisterSymbols::MEMORY),
-        0x4f => state.mov_register_move(i8080::RegisterSymbols::C, i8080::RegisterSymbols::A),
-        0x50 => state.mov_register_move(i8080::RegisterSymbols::D, i8080::RegisterSymbols::B),
-        0x51 => state.mov_register_move(i8080::RegisterSymbols::D, i8080::RegisterSymbols::C),
-        0x52 => state.mov_register_move(i8080::RegisterSymbols::D, i8080::RegisterSymbols::D),
-        0x53 => state.mov_register_move(i8080::RegisterSymbols::D, i8080::RegisterSymbols::E),
-        0x54 => state.mov_register_move(i8080::RegisterSymbols::D, i8080::RegisterSymbols::H),
-        0x55 => state.mov_register_move(i8080::RegisterSymbols::D, i8080::RegisterSymbols::L),
-        0x56 => state.mov_register_move(i8080::RegisterSymbols::D, i8080::RegisterSymbols::MEMORY),
-        0x57 => state.mov_register_move(i8080::RegisterSymbols::D, i8080::RegisterSymbols::A),
-        0x58 => state.mov_register_move(i8080::RegisterSymbols::E, i8080::RegisterSymbols::B),
-        0x59 => state.mov_register_move(i8080::RegisterSymbols::E, i8080::RegisterSymbols::C),
-        0x5a => state.mov_register_move(i8080::RegisterSymbols::E, i8080::RegisterSymbols::D),
-        0x5b => state.mov_register_move(i8080::RegisterSymbols::E, i8080::RegisterSymbols::E),
-        0x5c => state.mov_register_move(i8080::RegisterSymbols::E, i8080::RegisterSymbols::H),
-        0x5d => state.mov_register_move(i8080::RegisterSymbols::E, i8080::RegisterSymbols::L),
-        0x5e => state.mov_register_move(i8080::RegisterSymbols::E, i8080::RegisterSymbols::MEMORY),
-        0x5f => state.mov_register_move(i8080::RegisterSymbols::E, i8080::RegisterSymbols::A),
-        0x60 => state.mov_register_move(i8080::RegisterSymbols::H, i8080::RegisterSymbols::B),
-        0x61 => state.mov_register_move(i8080::RegisterSymbols::H, i8080::RegisterSymbols::C),
-        0x62 => state.mov_register_move(i8080::RegisterSymbols::H, i8080::RegisterSymbols::D),
-        0x63 => state.mov_register_move(i8080::RegisterSymbols::H, i8080::RegisterSymbols::E),
-        0x64 => state.mov_register_move(i8080::RegisterSymbols::H, i8080::RegisterSymbols::H),
-        0x65 => state.mov_register_move(i8080::RegisterSymbols::H, i8080::RegisterSymbols::L),
-        0x66 => state.mov_register_move(i8080::RegisterSymbols::H, i8080::RegisterSymbols::MEMORY),
-        0x67 => state.mov_register_move(i8080::RegisterSymbols::H, i8080::RegisterSymbols::A),
-        0x68 => state.mov_register_move(i8080::RegisterSymbols::L, i8080::RegisterSymbols::B),
-        0x69 => state.mov_register_move(i8080::RegisterSymbols::L, i8080::RegisterSymbols::C),
-        0x6a => state.mov_register_move(i8080::RegisterSymbols::L, i8080::RegisterSymbols::D),
-        0x6b => state.mov_register_move(i8080::RegisterSymbols::L, i8080::RegisterSymbols::E),
-        0x6c => state.mov_register_move(i8080::RegisterSymbols::L, i8080::RegisterSymbols::H),
-        0x6d => state.mov_register_move(i8080::RegisterSymbols::L, i8080::RegisterSymbols::L),
-        0x6e => state.mov_register_move(i8080::RegisterSymbols::L, i8080::RegisterSymbols::MEMORY),
-        0x6f => state.mov_register_move(i8080::RegisterSymbols::L, i8080::RegisterSymbols::A),
-        0x70 => state.mov_register_move(i8080::RegisterSymbols::MEMORY, i8080::RegisterSymbols::B),
-        0x71 => state.mov_register_move(i8080::RegisterSymbols::MEMORY, i8080::RegisterSymbols::C),
-        0x72 => state.mov_register_move(i8080::RegisterSymbols::MEMORY, i8080::RegisterSymbols::D),
-        0x73 => state.mov_register_move(i8080::RegisterSymbols::MEMORY, i8080::RegisterSymbols::E),
-        0x74 => state.mov_register_move(i8080::RegisterSymbols::MEMORY, i8080::RegisterSymbols::H),
-        0x75 => state.mov_register_move(i8080::RegisterSymbols::MEMORY, i8080::RegisterSymbols::L),
-        0x76 => state.hlt_halt(),
-        0x77 => state.mov_register_move(i8080::RegisterSymbols::MEMORY, i8080::RegisterSymbols::A),
-        0x78 => state.mov_register_move(i8080::RegisterSymbols::A, i8080::RegisterSymbols::B),
-        0x79 => state.mov_register_move(i8080::RegisterSymbols::A, i8080::RegisterSymbols::C),
-        0x7a => state.mov_register_move(i8080::RegisterSymbols::A, i8080::RegisterSymbols::D),
-        0x7b => state.mov_register_move(i8080::RegisterSymbols::A, i8080::RegisterSymbols::E),
-        0x7c => state.mov_register_move(i8080::RegisterSymbols::A, i8080::RegisterSymbols::H),
-        0x7d => state.mov_register_move(i8080::RegisterSymbols::A, i8080::RegisterSymbols::L),
-        0x7e => state.mov_register_move(i8080::RegisterSymbols::A, i8080::RegisterSymbols::MEMORY),
-        0x7f => state.mov_register_move(i8080::RegisterSymbols::A, i8080::RegisterSymbols::A),
-        0x80 => state.add_register_add(i8080::RegisterSymbols::B),
-        0x81 => state.add_register_add(i8080::RegisterSymbols::C),
-        0x82 => state.add_register_add(i8080::RegisterSymbols::D),
-        0x83 => state.add_register_add(i8080::RegisterSymbols::E),
-        0x84 => state.add_register_add(i8080::RegisterSymbols::H),
-        0x85 => state.add_register_add(i8080::RegisterSymbols::L),
-        0x86 => state.add_register_add(i8080::RegisterSymbols::MEMORY),
-        0x87 => state.add_register_add(i8080::RegisterSymbols::A),
-        0x88 => state.adc_add_with_carry_register(i8080::RegisterSymbols::B),
-        0x89 => state.adc_add_with_carry_register(i8080::RegisterSymbols::C),
-        0x8a => state.adc_add_with_carry_register(i8080::RegisterSymbols::D),
-        0x8b => state.adc_add_with_carry_register(i8080::RegisterSymbols::E),
-        0x8c => state.adc_add_with_carry_register(i8080::RegisterSymbols::H),
-        0x8d => state.adc_add_with_carry_register(i8080::RegisterSymbols::L),
-        0x8e => state.adc_add_with_carry_register(i8080::RegisterSymbols::MEMORY),
-        0x8f => state.adc_add_with_carry_register(i8080::RegisterSymbols::A),
-        0x90 => state.sub_register_subtract(i8080::RegisterSymbols::B),
-        0x91 => state.sub_register_subtract(i8080::RegisterSymbols::C),
-        0x92 => state.sub_register_subtract(i8080::RegisterSymbols::D),
-        0x93 => state.sub_register_subtract(i8080::RegisterSymbols::E),
-        0x94 => state.sub_register_subtract(i8080::RegisterSymbols::H),
-        0x95 => state.sub_register_subtract(i8080::RegisterSymbols::L),
-        0x96 => state.sub_register_subtract(i8080::RegisterSymbols::MEMORY),
-        0x97 => state.sub_register_subtract(i8080::RegisterSymbols::A),
-        0x98 => state.sbb_subtract_with_carry_register(i8080::RegisterSymbols::B),
-        0x99 => state.sbb_subtract_with_carry_register(i8080::RegisterSymbols::C),
-        0x9a => state.sbb_subtract_with_carry_register(i8080::RegisterSymbols::D),
-        0x9b => state.sbb_subtract_with_carry_register(i8080::RegisterSymbols::E),
-        0x9c => state.sbb_subtract_with_carry_register(i8080::RegisterSymbols::H),
-        0x9d => state.sbb_subtract_with_carry_register(i8080::RegisterSymbols::L),
-        0x9e => state.sbb_subtract_with_carry_register(i8080::RegisterSymbols::MEMORY),
-        0x9f => state.sbb_subtract_with_carry_register(i8080::RegisterSymbols::A),
-        0xa0 => state.ana_and_register(i8080::RegisterSymbols::B),
-        0xa1 => state.ana_and_register(i8080::RegisterSymbols::C),
-        0xa2 => state.ana_and_register(i8080::RegisterSymbols::D),
-        0xa3 => state.ana_and_register(i8080::RegisterSymbols::E),
-        0xa4 => state.ana_and_register(i8080::RegisterSymbols::H),
-        0xa5 => state.ana_and_register(i8080::RegisterSymbols::L),
-        0xa6 => state.ana_and_register(i8080::RegisterSymbols::MEMORY),
-        0xa7 => state.ana_and_register(i8080::RegisterSymbols::A),
-        0xa8 => state.xra_exclusive_or_accumulator(i8080::RegisterSymbols::B),
-        0xa9 => state.xra_exclusive_or_accumulator(i8080::RegisterSymbols::C),
-        0xaa => state.xra_exclusive_or_accumulator(i8080::RegisterSymbols::D),
-        0xab => state.xra_exclusive_or_accumulator(i8080::RegisterSymbols::E),
-        0xac => state.xra_exclusive_or_accumulator(i8080::RegisterSymbols::H),
-        0xad => state.xra_exclusive_or_accumulator(i8080::RegisterSymbols::L),
-        0xae => state.xra_exclusive_or_accumulator(i8080::RegisterSymbols::MEMORY),
-        0xaf => state.xra_exclusive_or_accumulator(i8080::RegisterSymbols::A),
-        0xb0 => state.ora_inclusive_or_accumulator(i8080::RegisterSymbols::B),
-        0xb1 => state.ora_inclusive_or_accumulator(i8080::RegisterSymbols::C),
-        0xb2 => state.ora_inclusive_or_accumulator(i8080::RegisterSymbols::D),
-        0xb3 => state.ora_inclusive_or_accumulator(i8080::RegisterSymbols::E),
-        0xb4 => state.ora_inclusive_or_accumulator(i8080::RegisterSymbols::H),
-        0xb5 => state.ora_inclusive_or_accumulator(i8080::RegisterSymbols::L),
-        0xb6 => state.ora_inclusive_or_accumulator(i8080::RegisterSymbols::MEMORY),
-        0xb7 => state.ora_inclusive_or_accumulator(i8080::RegisterSymbols::A),
-        0xb8 => state.cmp_compare_register_to_accumulator(i8080::RegisterSymbols::B),
-        0xb9 => state.cmp_compare_register_to_accumulator(i8080::RegisterSymbols::C),
-        0xba => state.cmp_compare_register_to_accumulator(i8080::RegisterSymbols::D),
-        0xbb => state.cmp_compare_register_to_accumulator(i8080::RegisterSymbols::E),
-        0xbc => state.cmp_compare_register_to_accumulator(i8080::RegisterSymbols::H),
-        0xbd => state.cmp_compare_register_to_accumulator(i8080::RegisterSymbols::L),
-        0xbe => state.cmp_compare_register_to_accumulator(i8080::RegisterSymbols::MEMORY),
-        0xbf => state.cmp_compare_register_to_accumulator(i8080::RegisterSymbols::A),
-        0xc0 => state.rnz_return_if_not_zero(),
-        0xc1 => state.pop_remove_from_stack(i8080::RegisterSymbols::B),
-        0xc2 => state.jnz_jump_if_not_zero(),
-        0xc3 => state.jmp_jump(),
-        0xc4 => state.cnz_call_if_not_zero(),
-        0xc5 => state.push_add_to_stack(i8080::RegisterSymbols::B),
-        0xc6 => state.adi_immediate_add(),
-        0xc8 => state.rz_return_if_zero(),
-        0xc9 => state.ret_function_return(),
-        0xca => state.jz_jump_if_zero(),
-        0xcd => state.call_function_call(),
-        0xcc => state.cz_call_if_zero(),
-        0xce => state.aci_add_with_carry_immediate(),
-        0xd0 => state.rnc_return_if_no_carry(),
-        0xd1 => state.pop_remove_from_stack(i8080::RegisterSymbols::D),
-        0xd2 => state.jnc_jump_if_no_carry(),
-        0xd4 => state.cnc_call_if_no_carry(),
-        0xd5 => state.push_add_to_stack(i8080::RegisterSymbols::D),
-        0xd6 => state.sui_immediate_subtract(),
-        0xd8 => state.rc_return_if_carry(),
-        0xda => state.jc_jump_if_carry(),
-        0xdc => state.cc_call_if_carry(),
-        0xde => state.sbi_subtract_with_carry_immediate(),
-        0xe0 => state.rpo_return_if_parity_odd(),
-        0xe1 => state.pop_remove_from_stack(i8080::RegisterSymbols::H),
-        0xe2 => state.jpo_jump_if_parity_odd(),
-        0xe3 => state.xthl_exchange_top_stack_with_hl(),
-        0xe4 => state.cpo_call_if_parity_odd(),
-        0xe5 => state.push_add_to_stack(i8080::RegisterSymbols::H),
-        0xe6 => state.ani_and_immediate(),
-        0xe8 => state.rpe_return_if_parity_even(),
-        0xe9 => state.pchl_load_pc_from_hl(),
-        0xea => state.jpe_jump_if_parity_even(),
-        0xeb => state.xchg_exchange_registers(),
-        0xec => state.cpe_call_if_parity_even(),
-        0xee => state.xri_exclusive_or_immediate(),
-        0xf0 => state.rp_return_if_plus(),
-        0xf1 => state.pop_remove_from_stack(i8080::RegisterSymbols::PSW),
-        0xf2 => state.jp_jump_if_plus(),
-        0xf3 => state.di_disable_interrupts(),
-        0xf4 => state.cp_call_if_plus(),
-        0xf5 => state.push_add_to_stack(i8080::RegisterSymbols::PSW),
-        0xf6 => state.ori_inclusive_or_immediate(),
-        0xf8 => state.rm_return_if_minus(),
-        0xf9 => state.sphl_load_sp_from_hl(),
-        0xfa => state.jm_jump_if_minus(),
-        0xfb => state.ei_enable_interrupts(),
-        0xfc => state.cm_call_if_minus(),
-        0xfe => state.cpi_compare_immediate_to_accumulator(),
-        _ => state.unimplemented_instruction(),
-    }
+use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
+use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
+use vulkano::command_buffer::RenderingAttachmentInfo;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, RenderingInfo};
+use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
+use vulkano::device::DeviceExtensions;
+use vulkano::device::Features;
+use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo, QueueFlags};
+use vulkano::image::view::ImageView;
+use vulkano::image::{Image, ImageUsage};
+use vulkano::instance::{Instance, InstanceCreateInfo};
+use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
+use vulkano::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorBlendState};
+use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
+use vulkano::pipeline::graphics::multisample::MultisampleState;
+use vulkano::pipeline::graphics::rasterization::RasterizationState;
+use vulkano::pipeline::graphics::subpass::PipelineRenderingCreateInfo;
+use vulkano::pipeline::graphics::vertex_input::{Vertex, VertexDefinition};
+use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
+use vulkano::pipeline::graphics::GraphicsPipelineCreateInfo;
+use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
+use vulkano::pipeline::DynamicState;
+use vulkano::pipeline::{GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo};
+use vulkano::render_pass::AttachmentLoadOp;
+use vulkano::swapchain::{self, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
+use vulkano::sync::{self, GpuFuture};
+use vulkano::Validated;
+use vulkano::Version;
+use winit::event::{Event, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::WindowBuilder;
+
+use crate::emulate8080::run_emulation;
+
+#[derive(BufferContents, Vertex)]
+#[repr(C)]
+pub struct Vertex2D {
+    #[format(R32G32_SFLOAT)]
+    position: [f32; 2],
+
+    #[name("color")]
+    #[format(R32G32B32_SFLOAT)]
+    color: [f32; 3],
+}
+
+fn adjust_window_size(images: &[Arc<Image>], viewport: &mut Viewport) -> Vec<Arc<ImageView>> {
+    let extent = images[0].extent();
+    viewport.extent = [extent[0] as f32, extent[1] as f32];
+
+    images
+        .iter()
+        .map(|image| ImageView::new_default(image.clone()).unwrap())
+        .collect::<Vec<_>>()
+}
+
+fn select_physical_device(
+    instance: &Arc<Instance>,
+    surface: &Arc<Surface>,
+    device_extensions: &DeviceExtensions,
+) -> (Arc<PhysicalDevice>, u32) {
+    instance
+        .enumerate_physical_devices()
+        .unwrap()
+        .filter(|pd| {
+            (pd.api_version() >= Version::V1_3 || pd.supported_extensions().khr_dynamic_rendering)
+                && pd.supported_extensions().contains(&device_extensions)
+        })
+        .filter_map(|pd| {
+            pd.queue_family_properties()
+                .iter()
+                .enumerate()
+                .position(|(i, q)| {
+                    q.queue_flags.contains(QueueFlags::GRAPHICS)
+                        && pd.surface_support(i as u32, &surface).unwrap_or(false)
+                })
+                .map(|q| (pd, q as u32))
+        })
+        .min_by_key(|(pd, _)| match pd.properties().device_type {
+            PhysicalDeviceType::DiscreteGpu => 0,
+            PhysicalDeviceType::IntegratedGpu => 1,
+            PhysicalDeviceType::VirtualGpu => 2,
+            PhysicalDeviceType::Cpu => 3,
+            _ => 4,
+        })
+        .expect("No suitable device available")
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut do_dissassemble = false;
     let mut filename = String::new();
     let mut arg_iterator = 1;
     let mut do_test = false;
+    let mut do_help = false;
+    let mut do_dissassemble = false;
+
+    // Get flags
     while arg_iterator < args.len() {
         match args[arg_iterator].as_str() {
-            "-d" => do_dissassemble = true,
-            "-f" => {
+            "-d" | "--disassemble" => do_dissassemble = true,
+            "-f" | "--file" => {
                 arg_iterator += 1;
                 filename = args[arg_iterator].clone();
             }
-            "-t" => do_test = true,
+            "-t" | "--test" => do_test = true,
+            "-h" | "--help" => do_help = true,
             _ => panic!("Unknown flag given {}", args[arg_iterator]),
         }
         arg_iterator += 1;
     }
+
+    // Print help info (Exits if help flag set)
+    if do_help {
+        println!("8080 Emulator");
+        println!("flags                 input               description");
+        println!("-d, --disassemble                         Disassemble file");
+        println!("-f, --file            <filename>          Enter filename");
+        println!("-t, --test                                Indicates test file");
+        println!("-h, --help                                print command info");
+        return;
+    }
+
+    // Get filename if it wasn't set in the flags
     if filename == "" {
+        println!("File not provided (use -h or --help for flags)");
         println!("Enter ROM filename:");
         io::stdin()
             .read_line(&mut filename)
             .expect("Filename not entered.");
         filename = filename.trim().to_string();
     }
+
+    // Read the filename to a buffer
     let mut buffer: Vec<u8> = match fs::read(filename.clone()) {
         Ok(res) => res,
         Err(why) => panic!("Failed to open file {}: {}", filename, why),
     };
 
-    buffer.resize(0x10000, 0);
-
+    // Disassemble provided file
     if do_dissassemble {
         let mut program_counter = 0;
         while program_counter < buffer.len() {
@@ -287,36 +155,377 @@ fn main() {
         return;
     }
 
-    let mut state = i8080::State::new(buffer, do_test);
+    // 8080 memory size is 2^64
+    buffer.resize(0x10000, 0);
 
-    if state.testing {
-        // provided test needs to start at 0x100
-        state.memory.rotate_right(0x100);
+    let state = Arc::new(Mutex::new(i8080::State::new(buffer, do_test)));
 
-        // jump to 0x100
-        state.memory[0x00] = 0xc3;
-        state.memory[0x01] = 0x00;
-        state.memory[0x02] = 0x01;
+    {
+        let mut state = state.lock().unwrap();
+        // Test files don't need vulkan
+        if state.testing {
+            // provided test needs to start at 0x100
+            state.memory.rotate_right(0x100);
 
-        // fix stack pointer location since starts at 0x100
-        state.memory[0x170] = 0x07;
+            // jump to 0x100
+            state.memory[0x00] = 0xc3;
+            state.memory[0x01] = 0x00;
+            state.memory[0x02] = 0x01;
 
-        // change 0x05 to ret since it is a print call
-        state.memory[0x05] = 0xc9; // make sure it returns
+            // fix stack pointer location since starts at 0x100
+            state.memory[0x170] = 0x07;
 
-        // start testing loop which adds special calls
-        while !state.should_exit {
-            state.check_and_print_call();
-            let prev_pc = state.program_counter;
-            emulate8080_op(&mut state);
-            if state.program_counter == 0 {
-                println!("Exit from {:04x}", prev_pc);
-                state.should_exit = true;
+            // change 0x05 to ret since it is a print call
+            state.memory[0x05] = 0xc9; // make sure it returns
+
+            // start testing loop which adds special calls
+            while !state.should_exit {
+                state.check_and_print_call();
+                let prev_pc = state.program_counter;
+                emulate8080::emulate8080_op(&mut state);
+                if state.program_counter == 0 {
+                    println!("Exit from {:04x}", prev_pc);
+                    state.should_exit = true;
+                }
             }
+            return;
         }
     }
 
-    while !state.should_exit {
-        emulate8080_op(&mut state);
-    }
+    let event_loop = EventLoop::new().unwrap();
+
+    let library = vulkano::VulkanLibrary::new().expect("No local Vulkan library/DLL");
+    let required_extensions = Surface::required_extensions(&event_loop);
+
+    let instance = Instance::new(
+        library,
+        InstanceCreateInfo {
+            enabled_extensions: required_extensions,
+            ..Default::default()
+        },
+    )
+    .expect("Failed to create instance");
+
+    let window = Arc::new(WindowBuilder::new().build(&event_loop).unwrap());
+
+    let surface = Surface::from_window(instance.clone(), window.clone()).unwrap();
+
+    let device_extensions = DeviceExtensions {
+        khr_swapchain: true,
+        ..DeviceExtensions::empty()
+    };
+
+    let (phys_dev, queue_family_index) =
+        select_physical_device(&instance, &surface, &device_extensions);
+
+    println!(
+        "Using device: {} (type: {:?})",
+        phys_dev.properties().device_name,
+        phys_dev.properties().device_type
+    );
+
+    let (device, mut queues) = Device::new(
+        phys_dev,
+        DeviceCreateInfo {
+            queue_create_infos: vec![QueueCreateInfo {
+                queue_family_index,
+                ..Default::default()
+            }],
+            enabled_extensions: device_extensions,
+            enabled_features: Features {
+                dynamic_rendering: true,
+                ..Features::empty()
+            },
+            ..Default::default()
+        },
+    )
+    .expect("Failed to create device");
+
+    let queue = queues.next().unwrap();
+
+    let (mut swapchain, images) = {
+        let surface_capabilities = device
+            .physical_device()
+            .surface_capabilities(&surface, Default::default())
+            .unwrap();
+
+        let image_format = device
+            .physical_device()
+            .surface_formats(&surface, Default::default())
+            .unwrap()[0]
+            .0;
+
+        Swapchain::new(
+            device.clone(),
+            surface.clone(),
+            SwapchainCreateInfo {
+                min_image_count: surface_capabilities.min_image_count.max(2),
+                image_format,
+                image_extent: window.inner_size().into(),
+                image_usage: ImageUsage::COLOR_ATTACHMENT,
+                composite_alpha: surface_capabilities
+                    .supported_composite_alpha
+                    .into_iter()
+                    .next()
+                    .unwrap(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+
+    let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+
+    let pipeline = {
+        let vs = shaders::vs::load(device.clone())
+            .unwrap()
+            .entry_point("main")
+            .unwrap();
+        let fs = shaders::fs::load(device.clone())
+            .unwrap()
+            .entry_point("main")
+            .unwrap();
+
+        let vertex_input_state = Vertex2D::per_vertex()
+            .definition(&vs.info().input_interface)
+            .unwrap();
+
+        let stages = [
+            PipelineShaderStageCreateInfo::new(vs),
+            PipelineShaderStageCreateInfo::new(fs),
+        ];
+
+        let layout = PipelineLayout::new(
+            device.clone(),
+            PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
+                .into_pipeline_layout_create_info(device.clone())
+                .unwrap(),
+        )
+        .unwrap();
+
+        let subpass = PipelineRenderingCreateInfo {
+            color_attachment_formats: vec![Some(swapchain.image_format())],
+            ..Default::default()
+        };
+
+        GraphicsPipeline::new(
+            device.clone(),
+            None,
+            GraphicsPipelineCreateInfo {
+                stages: stages.into_iter().collect(),
+                vertex_input_state: Some(vertex_input_state),
+                input_assembly_state: Some(InputAssemblyState::default()),
+                viewport_state: Some(ViewportState::default()),
+                rasterization_state: Some(RasterizationState::default()),
+                multisample_state: Some(MultisampleState::default()),
+                color_blend_state: Some(ColorBlendState::with_attachment_states(
+                    subpass.color_attachment_formats.len() as u32,
+                    ColorBlendAttachmentState::default(),
+                )),
+                dynamic_state: [DynamicState::Viewport].into_iter().collect(),
+                subpass: Some(subpass.into()),
+                ..GraphicsPipelineCreateInfo::layout(layout)
+            },
+        )
+        .unwrap()
+    };
+
+    let mut viewport = Viewport {
+        offset: [0.0, 0.0],
+        extent: [0.0, 0.0],
+        depth_range: 0.0..=1.0,
+    };
+
+    let mut attachment_image_views = adjust_window_size(&images, &mut viewport);
+
+    let command_buffer_allocator =
+        StandardCommandBufferAllocator::new(device.clone(), Default::default());
+
+    let vertex1 = Vertex2D {
+        position: [-0.5, -0.5],
+        color: [1.0, 0.0, 0.0],
+    };
+    let vertex2 = Vertex2D {
+        position: [-0.5, 0.5],
+        color: [0.0, 1.0, 0.0],
+    };
+    let vertex3 = Vertex2D {
+        position: [0.5, -0.5],
+        color: [0.0, 0.0, 1.0],
+    };
+    let vertex4 = Vertex2D {
+        position: [0.5, 0.5],
+        color: [1.0, 0.0, 1.0],
+    };
+
+    let vertex_buffer = Buffer::from_iter(
+        memory_allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::VERTEX_BUFFER,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        vec![vertex1, vertex2, vertex3, vertex4],
+    )
+    .unwrap();
+
+    let index_buffer = Buffer::from_iter(
+        memory_allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::INDEX_BUFFER,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        vec![1, 0, 2, 1, 2, 3u16],
+    )
+    .unwrap();
+
+    let mut recreate_swapchain = false;
+
+    let mut previous_fence = Some(sync::now(device.clone()).boxed());
+
+    let thread_state = Arc::clone(&state);
+
+    let handle = thread::spawn(move || {
+        run_emulation(thread_state);
+    });
+
+    event_loop
+        .run(move |event, elwt| {
+            elwt.set_control_flow(ControlFlow::Poll);
+
+            match event {
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => {
+                    {
+                        let mut state = state.lock().unwrap();
+                        state.should_exit = true;
+                    }
+
+                    elwt.exit();
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::Resized(_),
+                    ..
+                } => {
+                    recreate_swapchain = true;
+                }
+                Event::AboutToWait => {
+                    let image_extent: [u32; 2] = window.inner_size().into();
+
+                    if image_extent.contains(&0) {
+                        return;
+                    }
+
+                    previous_fence.as_mut().unwrap().cleanup_finished();
+
+                    if recreate_swapchain {
+                        recreate_swapchain = false;
+
+                        let (new_swapchain, new_images) = swapchain
+                            .recreate(SwapchainCreateInfo {
+                                image_extent,
+                                ..swapchain.create_info()
+                            })
+                            .expect("Failed to recreate swapchain");
+
+                        swapchain = new_swapchain;
+
+                        attachment_image_views = adjust_window_size(&new_images, &mut viewport);
+                    }
+
+                    let (image_index, suboptimal, acquire_future) =
+                        match swapchain::acquire_next_image(swapchain.clone(), None)
+                            .map_err(Validated::unwrap)
+                        {
+                            Ok(r) => r,
+                            Err(vulkano::VulkanError::OutOfDate) => {
+                                recreate_swapchain = true;
+                                return;
+                            }
+                            Err(e) => panic!("Failed to acquire next image: {e}"),
+                        };
+
+                    if suboptimal {
+                        recreate_swapchain = true;
+                    }
+
+                    //let mut builder = AutoCommandBufferBuilder::
+                    let mut builder = AutoCommandBufferBuilder::primary(
+                        &command_buffer_allocator,
+                        queue.queue_family_index(),
+                        CommandBufferUsage::MultipleSubmit,
+                    )
+                    .unwrap();
+
+                    builder
+                        .begin_rendering(RenderingInfo {
+                            color_attachments: vec![Some(RenderingAttachmentInfo {
+                                load_op: AttachmentLoadOp::Clear,
+                                store_op: vulkano::render_pass::AttachmentStoreOp::Store,
+                                clear_value: Some([0.0, 0.0, 1.0, 1.0].into()),
+                                ..RenderingAttachmentInfo::image_view(
+                                    attachment_image_views[image_index as usize].clone(),
+                                )
+                            })],
+                            ..Default::default()
+                        })
+                        .unwrap()
+                        .set_viewport(0, [viewport.clone()].into_iter().collect())
+                        .unwrap()
+                        .bind_pipeline_graphics(pipeline.clone())
+                        .unwrap()
+                        .bind_vertex_buffers(0, vertex_buffer.clone())
+                        .unwrap()
+                        .bind_index_buffer(index_buffer.clone())
+                        .unwrap()
+                        .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
+                        .unwrap()
+                        .end_rendering()
+                        .unwrap();
+
+                    let command_buffer = builder.build().unwrap();
+
+                    let future = previous_fence
+                        .take()
+                        .unwrap()
+                        .join(acquire_future)
+                        .then_execute(queue.clone(), command_buffer)
+                        .unwrap()
+                        .then_swapchain_present(
+                            queue.clone(),
+                            SwapchainPresentInfo::swapchain_image_index(
+                                swapchain.clone(),
+                                image_index,
+                            ),
+                        )
+                        .then_signal_fence_and_flush();
+
+                    match future.map_err(Validated::unwrap) {
+                        Ok(future) => {
+                            previous_fence = Some(future.boxed());
+                        }
+                        Err(vulkano::VulkanError::OutOfDate) => {
+                            recreate_swapchain = true;
+                            previous_fence = Some(sync::now(device.clone()).boxed());
+                        }
+                        Err(e) => panic!("Failed to flush future: {e}"),
+                    }
+                }
+                _ => (),
+            }
+        })
+        .unwrap();
+
+    handle.join().unwrap();
 }
