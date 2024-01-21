@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex};
 
+use vulkano::buffer::Subbuffer;
+
 use crate::i8080;
 
 pub fn run_emulation(state: Arc<Mutex<i8080::State>>) {
@@ -9,6 +11,21 @@ pub fn run_emulation(state: Arc<Mutex<i8080::State>>) {
             let mut state = state.lock().unwrap();
             emulate8080_op(&mut state);
             should_exit = state.should_exit;
+        }
+    }
+}
+
+pub fn copy_screen_memory(state: &Arc<Mutex<i8080::State>>, upload_buffer: &Subbuffer<[u8]>) {
+    let data = state.lock().unwrap();
+
+    let mut write = upload_buffer.write().unwrap();
+    for ind in 0..(256 * 28) {
+        for bit in 0..8 {
+            let value = ((data.memory[ind + 0x2400] >> bit) & 0x1) * 0xff;
+            write[ind * 32 + bit * 4] = value;
+            write[ind * 32 + bit * 4 + 1] = value;
+            write[ind * 32 + bit * 4 + 2] = value;
+            write[ind * 32 + bit * 4 + 3] = 0xff;
         }
     }
 }
@@ -218,6 +235,7 @@ pub fn emulate8080_op(state: &mut i8080::State) {
         0xd0 => state.rnc_return_if_no_carry(),
         0xd1 => state.pop_remove_from_stack(i8080::RegisterSymbols::D),
         0xd2 => state.jnc_jump_if_no_carry(),
+        0xd3 => state.out_send_output(),
         0xd4 => state.cnc_call_if_no_carry(),
         0xd5 => state.push_add_to_stack(i8080::RegisterSymbols::D),
         0xd6 => state.sui_immediate_subtract(),

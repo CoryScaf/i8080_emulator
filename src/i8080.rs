@@ -1,6 +1,7 @@
 use crate::disassemble;
 
 mod bitwise;
+mod io_ops;
 mod jump;
 mod load;
 mod math;
