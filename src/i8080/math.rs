@@ -23,44 +23,47 @@ impl State {
     }
 
     // ADD reg
-    // Add given register to register A
-    pub fn add_register_add(&mut self, register: RegisterSymbols) {
+    pub fn add_register_add(&mut self, register: RegisterSymbols) -> u32 {
         let answer = self.get_single_register(&register) as u16;
         self.add_and_set_flags(answer);
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 4, 7);
     }
 
     // SUB reg
-    // Subtract given register from register A
-    pub fn sub_register_subtract(&mut self, register: RegisterSymbols) {
+    pub fn sub_register_subtract(&mut self, register: RegisterSymbols) -> u32 {
         let answer = self.get_single_register(&register) as u16;
         self.sub_and_set_flags(answer);
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 4, 7);
     }
 
     // ADI d8
-    // Add immediate to register A
-    pub fn adi_immediate_add(&mut self) {
+    pub fn adi_immediate_add(&mut self) -> u32 {
         let answer = self.get_next(1) as u16;
         self.add_and_set_flags(answer);
 
         self.program_counter += 2;
+
+        return 7;
     }
 
     // SUI d8
-    // Subtract immediate to register A
-    pub fn sui_immediate_subtract(&mut self) {
+    pub fn sui_immediate_subtract(&mut self) -> u32 {
         let answer = self.get_next(1) as u16;
         self.sub_and_set_flags(answer);
 
         self.program_counter += 2;
+
+        return 7;
     }
 
     // ACI d8
-    // Add immediate to register A and 0x1 if carry bit is set
-    pub fn aci_add_with_carry_immediate(&mut self) {
+    pub fn aci_add_with_carry_immediate(&mut self) -> u32 {
         let carry: u16 = match self.flags.carry {
             true => 0x1,
             false => 0x0,
@@ -69,11 +72,12 @@ impl State {
         self.add_and_set_flags(answer);
 
         self.program_counter += 2;
+
+        return 7;
     }
 
     // ADC reg
-    // Add register to register A and 0x1 if carry bit is set
-    pub fn adc_add_with_carry_register(&mut self, register: RegisterSymbols) {
+    pub fn adc_add_with_carry_register(&mut self, register: RegisterSymbols) -> u32 {
         let carry: u16 = match self.flags.carry {
             true => 0x1,
             false => 0x0,
@@ -82,11 +86,12 @@ impl State {
         self.add_and_set_flags(answer);
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 4, 7);
     }
 
     // SBI d8
-    // Subtract immediate to register A and 0x1 if carry bit is set
-    pub fn sbi_subtract_with_carry_immediate(&mut self) {
+    pub fn sbi_subtract_with_carry_immediate(&mut self) -> u32 {
         let carry: u16 = match self.flags.carry {
             true => 0x1,
             false => 0x0,
@@ -95,11 +100,12 @@ impl State {
         self.sub_and_set_flags(answer);
 
         self.program_counter += 2;
+
+        return 7;
     }
 
     // SBB reg
-    // Subtract register to register A and 0x1 if carry bit is set
-    pub fn sbb_subtract_with_carry_register(&mut self, register: RegisterSymbols) {
+    pub fn sbb_subtract_with_carry_register(&mut self, register: RegisterSymbols) -> u32 {
         let carry: u16 = match self.flags.carry {
             true => 0x1,
             false => 0x0,
@@ -108,11 +114,12 @@ impl State {
         self.sub_and_set_flags(answer);
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 4, 7);
     }
 
     // DAD reg
-    // Adds register pair to register pair HL, stores in HL
-    pub fn dad_double_add(&mut self, register: RegisterSymbols) {
+    pub fn dad_double_add(&mut self, register: RegisterSymbols) -> u32 {
         let hl_val = self.u8_pair_to_u16(self.reg_l, self.reg_h) as u32;
         let rp_val = self.get_pair_sp_register(&register) as u32;
 
@@ -122,11 +129,12 @@ impl State {
         self.flags.carry = result & 0x100 != 0;
 
         self.program_counter += 1;
+
+        return 10;
     }
 
     // DAA
-    // Decimal Adjust Accumulator prepares accumulator to be represented as two nibbles
-    pub fn daa_decimal_adjust_accumulator(&mut self) {
+    pub fn daa_decimal_adjust_accumulator(&mut self) -> u32 {
         let mut result = self.reg_a;
         let mut should_carry = false;
         if (result & 0xf) > 9 || self.flags.auxiliary_carry {
@@ -140,6 +148,8 @@ impl State {
         self.reg_a = result;
 
         self.program_counter += 1;
+
+        return 4;
     }
 
     fn check_increment_carry(&mut self, result: u8) {
@@ -150,40 +160,44 @@ impl State {
     }
 
     // INR reg
-    // increment given register by 1
-    pub fn inr_increment_register(&mut self, register: RegisterSymbols) {
+    pub fn inr_increment_register(&mut self, register: RegisterSymbols) -> u32 {
         let result = self.get_single_register(&register).wrapping_add(1);
         self.check_increment_carry(result);
         self.set_single_register(&register, result);
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 5, 10);
     }
 
     // INX reg
-    // increment given register pair by 1
-    pub fn inx_increment_register_pair(&mut self, register: RegisterSymbols) {
+    pub fn inx_increment_register_pair(&mut self, register: RegisterSymbols) -> u32 {
         let value = self.get_pair_sp_register(&register).wrapping_add(1);
         self.set_pair_sp_register(register, value);
 
         self.program_counter += 1;
+
+        return 5;
     }
 
     // DCR reg
-    // decrement given register by 1
-    pub fn dcr_decrement_register(&mut self, register: RegisterSymbols) {
+    pub fn dcr_decrement_register(&mut self, register: RegisterSymbols) -> u32 {
         let result = self.get_single_register(&register).wrapping_sub(1);
         self.check_increment_carry(result);
         self.set_single_register(&register, result);
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 5, 10);
     }
 
     // DCX reg
-    // decrement given register pair by 1
-    pub fn dcx_decrement_register_pair(&mut self, register: RegisterSymbols) {
+    pub fn dcx_decrement_register_pair(&mut self, register: RegisterSymbols) -> u32 {
         let value = self.get_pair_sp_register(&register).wrapping_sub(1);
         self.set_pair_sp_register(register, value);
 
         self.program_counter += 1;
+
+        return 5;
     }
 }

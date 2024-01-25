@@ -3,8 +3,7 @@ use crate::i8080::State;
 
 impl State {
     // RLC
-    // rotate bits left
-    pub fn rlc_rotate_left(&mut self) {
+    pub fn rlc_rotate_left(&mut self) -> u32 {
         self.flags.carry = self.reg_a & 0x80 != 0;
         let carry: u8 = match self.flags.carry {
             true => 1,
@@ -12,11 +11,12 @@ impl State {
         };
         self.reg_a = (self.reg_a << 1) | carry;
         self.program_counter += 1;
+
+        return 4;
     }
 
     // RRC
-    // rotate bits right
-    pub fn rrc_rotate_right(&mut self) {
+    pub fn rrc_rotate_right(&mut self) -> u32 {
         self.flags.carry = self.reg_a & 0x1 != 0;
         let carry: u8 = match self.flags.carry {
             true => 0x80,
@@ -24,11 +24,12 @@ impl State {
         };
         self.reg_a = (self.reg_a >> 1) | carry;
         self.program_counter += 1;
+
+        return 4;
     }
 
     // RAL
-    // rotate bits left through the carry bit
-    pub fn ral_rotate_left_though_carry(&mut self) {
+    pub fn ral_rotate_left_though_carry(&mut self) -> u32 {
         let carry: u8 = match self.flags.carry {
             true => 1,
             false => 0,
@@ -36,11 +37,12 @@ impl State {
         self.flags.carry = self.reg_a & 0x80 != 0;
         self.reg_a = (self.reg_a << 1) | carry;
         self.program_counter += 1;
+
+        return 4;
     }
 
     // RAR
-    // rotate bits right through the carry bit
-    pub fn rar_rotate_right_through_carry(&mut self) {
+    pub fn rar_rotate_right_through_carry(&mut self) -> u32 {
         let carry: u8 = match self.flags.carry {
             true => 0x80,
             false => 0,
@@ -48,27 +50,32 @@ impl State {
         self.flags.carry = self.reg_a & 0x1 != 0;
         self.reg_a = (self.reg_a >> 1) | carry;
         self.program_counter += 1;
+
+        return 4;
     }
 
     // CMA
-    // compliment the accumulator
-    pub fn cma_compliment_accumulator(&mut self) {
+    pub fn cma_compliment_accumulator(&mut self) -> u32 {
         self.reg_a = !self.reg_a;
         self.program_counter += 1;
+
+        return 4;
     }
 
     // CMC
-    // compliment the carry flag
-    pub fn cmc_compliment_carry(&mut self) {
+    pub fn cmc_compliment_carry(&mut self) -> u32 {
         self.flags.carry = !self.flags.carry;
         self.program_counter += 1;
+
+        return 4;
     }
 
     // STC
-    // set the carry flag
-    pub fn stc_set_carry_flag(&mut self) {
+    pub fn stc_set_carry_flag(&mut self) -> u32 {
         self.flags.carry = true;
         self.program_counter += 1;
+
+        return 4;
     }
 
     pub fn flags_on_accumulator(&mut self) {
@@ -88,82 +95,90 @@ impl State {
     }
 
     // CMP reg
-    // Compare accumulator with register value by subtracting
-    pub fn cmp_compare_register_to_accumulator(&mut self, register: RegisterSymbols) {
+    pub fn cmp_compare_register_to_accumulator(&mut self, register: RegisterSymbols) -> u32 {
         let cmp = self.get_single_register(&register) as u16;
         let result = (self.reg_a as u16).wrapping_sub(cmp);
         self.flags_for_compare(result);
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 4, 7);
     }
 
     // CPI d8
-    // Compare accumulator with immediate value by subtracting
-    pub fn cpi_compare_immediate_to_accumulator(&mut self) {
+    pub fn cpi_compare_immediate_to_accumulator(&mut self) -> u32 {
         let immediate = self.get_next(1) as u16;
         let result = (self.reg_a as u16).wrapping_sub(immediate);
         self.flags_for_compare(result);
 
         self.program_counter += 2;
+
+        return 7;
     }
 
     // ANA reg
-    // And between accumulator and register
-    pub fn ana_and_register(&mut self, register: RegisterSymbols) {
+    pub fn ana_and_register(&mut self, register: RegisterSymbols) -> u32 {
         let value = self.get_single_register(&register);
         self.reg_a &= value;
         self.flags_on_accumulator();
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 4, 7);
     }
 
     // ANI d8
-    // And between accumulator and immediate value
-    pub fn ani_and_immediate(&mut self) {
+    pub fn ani_and_immediate(&mut self) -> u32 {
         let immediate = self.get_next(1);
         self.reg_a &= immediate;
         self.flags_on_accumulator();
 
         self.program_counter += 2;
+
+        return 7;
     }
 
     // XRA reg
-    // exclusive or (^) with accumulator and given register
-    pub fn xra_exclusive_or_accumulator(&mut self, register: RegisterSymbols) {
+    pub fn xra_exclusive_or_accumulator(&mut self, register: RegisterSymbols) -> u32 {
         let value = self.get_single_register(&register);
         self.reg_a ^= value;
         self.flags_on_accumulator();
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 4, 7);
     }
 
     // XRI d8
-    // exclusive or between accumulator and immediate value
-    pub fn xri_exclusive_or_immediate(&mut self) {
+    pub fn xri_exclusive_or_immediate(&mut self) -> u32 {
         let immediate = self.get_next(1);
         self.reg_a ^= immediate;
         self.flags_on_accumulator();
 
         self.program_counter += 2;
+
+        return 7;
     }
 
     // ORA reg
-    // inclusive or (|) with accumulator and give register
-    pub fn ora_inclusive_or_accumulator(&mut self, register: RegisterSymbols) {
+    pub fn ora_inclusive_or_accumulator(&mut self, register: RegisterSymbols) -> u32 {
         let value = self.get_single_register(&register);
         self.reg_a |= value;
         self.flags_on_accumulator();
 
         self.program_counter += 1;
+
+        return State::get_cycles(register, 4, 7);
     }
 
     // ORI d8
-    // Or between accumulator and immediate value
-    pub fn ori_inclusive_or_immediate(&mut self) {
+    pub fn ori_inclusive_or_immediate(&mut self) -> u32 {
         let immediate = self.get_next(1);
         self.reg_a |= immediate;
         self.flags_on_accumulator();
 
         self.program_counter += 2;
+
+        return 7;
     }
 }

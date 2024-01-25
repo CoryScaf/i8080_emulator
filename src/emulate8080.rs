@@ -2,14 +2,55 @@ use std::sync::{Arc, Mutex};
 
 use vulkano::buffer::Subbuffer;
 
-use crate::i8080;
+use crate::{disassemble::disassemble8080_op, i8080};
 
 pub fn run_emulation(state: Arc<Mutex<i8080::State>>) {
     let mut should_exit = false;
+    let mut full_update = false;
+
+    // each MHz is 1,000,000 cycles per second
+    let cycles_per_second = 2.0 * 1_000_000.0;
+    let frames_per_second = 60.0;
+    let cycles_per_frame = (cycles_per_second / frames_per_second) as u32;
+
+    let mut last_interrupt = 0;
+    let mut last_frame_cycles = 0;
+
+    let start_time = std::time::SystemTime::now();
+    let mut last_time = 0;
+
     while !should_exit {
+        let mut cur_time = start_time.elapsed().unwrap().as_micros();
+        while cur_time - last_time < (last_frame_cycles as u128 / 2) {
+            cur_time = start_time.elapsed().unwrap().as_micros();
+        }
+        last_time = start_time.elapsed().unwrap().as_micros();
         {
             let mut state = state.lock().unwrap();
-            emulate8080_op(&mut state);
+
+            if last_interrupt > (cycles_per_frame / 2) {
+                if full_update {
+                    state.call_interrupt(2);
+                } else {
+                    state.call_interrupt(1);
+                }
+                full_update = !full_update;
+                last_interrupt = 0;
+            }
+
+            if state.enable_stepping {
+                if state.step_count > 0 {
+                    if state.step_count <= 10 {
+                        disassemble8080_op(&state.memory, state.program_counter as usize);
+                    }
+                    last_frame_cycles = emulate8080_op(&mut state);
+                    last_interrupt += last_frame_cycles;
+                    state.step_count -= 1;
+                }
+            } else {
+                last_frame_cycles = emulate8080_op(&mut state);
+                last_interrupt += last_frame_cycles;
+            }
             should_exit = state.should_exit;
         }
     }
@@ -31,10 +72,13 @@ pub fn copy_screen_memory(state: &Arc<Mutex<i8080::State>>, upload_buffer: &Subb
 }
 
 // call appropriate function for each code
-pub fn emulate8080_op(state: &mut i8080::State) {
+pub fn emulate8080_op(state: &mut i8080::State) -> u32 {
     match state.memory[state.program_counter as usize] {
         0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xcb | 0xd9 | 0xdd | 0xed
-        | 0xfd => state.program_counter += 1,
+        | 0xfd => {
+            state.program_counter += 1;
+            1
+        }
         0x01 => state.lxi_load_register_pair_immediate(i8080::RegisterSymbols::B),
         0x02 => state.stax_store_accumulator_indirect(i8080::RegisterSymbols::B),
         0x03 => state.inx_increment_register_pair(i8080::RegisterSymbols::B),
@@ -226,12 +270,14 @@ pub fn emulate8080_op(state: &mut i8080::State) {
         0xc4 => state.cnz_call_if_not_zero(),
         0xc5 => state.push_add_to_stack(i8080::RegisterSymbols::B),
         0xc6 => state.adi_immediate_add(),
+        0xc7 => state.rst_reset(0),
         0xc8 => state.rz_return_if_zero(),
         0xc9 => state.ret_function_return(),
         0xca => state.jz_jump_if_zero(),
         0xcd => state.call_function_call(),
         0xcc => state.cz_call_if_zero(),
         0xce => state.aci_add_with_carry_immediate(),
+        0xcf => state.rst_reset(1),
         0xd0 => state.rnc_return_if_no_carry(),
         0xd1 => state.pop_remove_from_stack(i8080::RegisterSymbols::D),
         0xd2 => state.jnc_jump_if_no_carry(),
@@ -239,10 +285,13 @@ pub fn emulate8080_op(state: &mut i8080::State) {
         0xd4 => state.cnc_call_if_no_carry(),
         0xd5 => state.push_add_to_stack(i8080::RegisterSymbols::D),
         0xd6 => state.sui_immediate_subtract(),
+        0xd7 => state.rst_reset(2),
         0xd8 => state.rc_return_if_carry(),
         0xda => state.jc_jump_if_carry(),
+        0xdb => state.in_update_input(),
         0xdc => state.cc_call_if_carry(),
         0xde => state.sbi_subtract_with_carry_immediate(),
+        0xdf => state.rst_reset(3),
         0xe0 => state.rpo_return_if_parity_odd(),
         0xe1 => state.pop_remove_from_stack(i8080::RegisterSymbols::H),
         0xe2 => state.jpo_jump_if_parity_odd(),
@@ -250,12 +299,14 @@ pub fn emulate8080_op(state: &mut i8080::State) {
         0xe4 => state.cpo_call_if_parity_odd(),
         0xe5 => state.push_add_to_stack(i8080::RegisterSymbols::H),
         0xe6 => state.ani_and_immediate(),
+        0xe7 => state.rst_reset(4),
         0xe8 => state.rpe_return_if_parity_even(),
         0xe9 => state.pchl_load_pc_from_hl(),
         0xea => state.jpe_jump_if_parity_even(),
         0xeb => state.xchg_exchange_registers(),
         0xec => state.cpe_call_if_parity_even(),
         0xee => state.xri_exclusive_or_immediate(),
+        0xef => state.rst_reset(5),
         0xf0 => state.rp_return_if_plus(),
         0xf1 => state.pop_remove_from_stack(i8080::RegisterSymbols::PSW),
         0xf2 => state.jp_jump_if_plus(),
@@ -263,12 +314,13 @@ pub fn emulate8080_op(state: &mut i8080::State) {
         0xf4 => state.cp_call_if_plus(),
         0xf5 => state.push_add_to_stack(i8080::RegisterSymbols::PSW),
         0xf6 => state.ori_inclusive_or_immediate(),
+        0xf7 => state.rst_reset(6),
         0xf8 => state.rm_return_if_minus(),
         0xf9 => state.sphl_load_sp_from_hl(),
         0xfa => state.jm_jump_if_minus(),
         0xfb => state.ei_enable_interrupts(),
         0xfc => state.cm_call_if_minus(),
         0xfe => state.cpi_compare_immediate_to_accumulator(),
-        _ => state.unimplemented_instruction(),
+        0xff => state.rst_reset(7),
     }
 }

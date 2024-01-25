@@ -1,5 +1,3 @@
-use crate::disassemble;
-
 mod bitwise;
 mod io_ops;
 mod jump;
@@ -30,19 +28,23 @@ pub struct Flags {
 }
 
 pub struct State {
-    reg_a: u8,
-    reg_b: u8,
-    reg_c: u8,
-    reg_d: u8,
-    reg_e: u8,
-    reg_h: u8,
-    reg_l: u8,
-    stack_pointer: u16,
+    pub reg_a: u8,
+    pub reg_b: u8,
+    pub reg_c: u8,
+    pub reg_d: u8,
+    pub reg_e: u8,
+    pub reg_h: u8,
+    pub reg_l: u8,
+    pub stack_pointer: u16,
     pub program_counter: u16,
     flags: Flags,
     pub memory: Vec<u8>,
     pub testing: bool,
     pub should_exit: bool,
+    pub step_count: u16,
+    pub enable_stepping: bool,
+    pub in_ports: [u8; 4],
+    shift_amount: u8,
 }
 
 impl State {
@@ -63,11 +65,15 @@ impl State {
                 parity: false,
                 carry: false,
                 auxiliary_carry: false,
-                interrupts_enabled: true,
+                interrupts_enabled: false,
             },
             memory: mem,
             testing: test,
             should_exit: false,
+            step_count: 1,
+            enable_stepping: false,
+            in_ports: [0b00001110, 0b00001000, 0b00000000, 0],
+            shift_amount: 0,
         }
     }
 
@@ -87,15 +93,6 @@ impl State {
         }
     }
 
-    pub fn unimplemented_instruction(&mut self) {
-        println!("Error: Unimplimented Instruction");
-        disassemble::disassemble8080_op(&mut self.memory, self.program_counter as usize);
-        panic!(
-            "SP: {:04x}\nInstruction: {:02x}",
-            self.stack_pointer, self.memory[self.program_counter as usize]
-        );
-    }
-
     fn get_next(&mut self, offset: u16) -> u8 {
         self.memory[(self.program_counter + offset) as usize]
     }
@@ -105,7 +102,7 @@ impl State {
     }
 
     // flags order in as a d8 is SZ0A0P1C
-    fn flags_to_u8(&mut self) -> u8 {
+    pub fn flags_to_u8(&self) -> u8 {
         let mut result: u8 = 0x02;
         if self.flags.sign {
             result |= 0x80;
@@ -228,24 +225,36 @@ impl State {
         }
     }
 
+    fn get_cycles(register: RegisterSymbols, low: u32, high: u32) -> u32 {
+        let mut cycles = low;
+        if matches!(register, RegisterSymbols::MEMORY) {
+            cycles = high;
+        }
+
+        return cycles;
+    }
+
     // HLT
-    // stop the program
-    pub fn hlt_halt(&mut self) {
+    pub fn hlt_halt(&mut self) -> u32 {
         println!("Halting at PC: {:04x}", self.program_counter);
         self.should_exit = true;
+
+        return 7;
     }
 
     // DI
-    // disable interrupts (e.g. io)
-    pub fn di_disable_interrupts(&mut self) {
+    pub fn di_disable_interrupts(&mut self) -> u32 {
         self.flags.interrupts_enabled = false;
         self.program_counter += 1;
+
+        return 4;
     }
 
     // EI
-    // enable interrupts (e.g. io)
-    pub fn ei_enable_interrupts(&mut self) {
+    pub fn ei_enable_interrupts(&mut self) -> u32 {
         self.flags.interrupts_enabled = true;
         self.program_counter += 1;
+
+        return 4;
     }
 }

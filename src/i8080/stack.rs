@@ -7,8 +7,7 @@ impl State {
         self.reg_a = ((value >> 8) & 0xff) as u8;
     }
     // XCHG
-    // Exchange register pairs H,L and D,E
-    pub fn xchg_exchange_registers(&mut self) {
+    pub fn xchg_exchange_registers(&mut self) -> u32 {
         let tmp_d = self.reg_d;
         let tmp_e = self.reg_e;
         self.reg_d = self.reg_h;
@@ -17,18 +16,20 @@ impl State {
         self.reg_l = tmp_e;
 
         self.program_counter += 1;
+
+        return 5;
     }
 
     // SPHL
-    // Load the stack pointer with the contents of H and L
-    pub fn sphl_load_sp_from_hl(&mut self) {
+    pub fn sphl_load_sp_from_hl(&mut self) -> u32 {
         self.stack_pointer = self.u8_pair_to_u16(self.reg_l, self.reg_h);
         self.program_counter += 1;
+
+        return 5;
     }
 
     // XTHL
-    // Load the top of the stack with the contents of H and L
-    pub fn xthl_exchange_top_stack_with_hl(&mut self) {
+    pub fn xthl_exchange_top_stack_with_hl(&mut self) -> u32 {
         let new_h = self.memory[(self.stack_pointer + 1) as usize];
         let new_l = self.memory[self.stack_pointer as usize];
         self.memory[(self.stack_pointer + 1) as usize] = self.reg_h;
@@ -37,17 +38,19 @@ impl State {
         self.reg_l = new_l;
 
         self.program_counter += 1;
+
+        return 18;
     }
 
     // PCHL
-    // Load the program counter with the contents of H and L
-    pub fn pchl_load_pc_from_hl(&mut self) {
+    pub fn pchl_load_pc_from_hl(&mut self) -> u32 {
         self.program_counter = self.u8_pair_to_u16(self.reg_l, self.reg_h);
+
+        return 5;
     }
 
     // PUSH reg
-    // push register pair to next point in stack
-    pub fn push_add_to_stack(&mut self, register: RegisterSymbols) {
+    pub fn push_add_to_stack(&mut self, register: RegisterSymbols) -> u32 {
         let value = match register {
             RegisterSymbols::B => self.u8_pair_to_u16(self.reg_c, self.reg_b),
             RegisterSymbols::D => self.u8_pair_to_u16(self.reg_e, self.reg_d),
@@ -61,11 +64,12 @@ impl State {
         self.push_stack(value);
 
         self.program_counter += 1;
+
+        return 11;
     }
 
     // POP reg
-    // pop last value off the stack and put it into register
-    pub fn pop_remove_from_stack(&mut self, register: RegisterSymbols) {
+    pub fn pop_remove_from_stack(&mut self, register: RegisterSymbols) -> u32 {
         let result = self.pop_stack();
         match register {
             RegisterSymbols::B => self.set_bc_pair(result),
@@ -76,5 +80,7 @@ impl State {
         }
 
         self.program_counter += 1;
+
+        return 10;
     }
 }

@@ -52,6 +52,8 @@ use vulkano::{
     sync::{self, GpuFuture},
     DeviceSize, Validated, VulkanError, VulkanLibrary,
 };
+use winit::event::ElementState;
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -66,6 +68,10 @@ use crate::emulate8080::run_emulation;
 pub struct Vertex2D {
     #[format(R32G32_SFLOAT)]
     position: [f32; 2],
+
+    #[name("tex_coords")]
+    #[format(R32G32_SFLOAT)]
+    tex_coords: [f32; 2],
 }
 
 fn adjust_window_size(
@@ -231,7 +237,12 @@ fn main() {
     )
     .expect("Failed to create instance");
 
-    let window = Arc::new(WindowBuilder::new().build(&event_loop).unwrap());
+    let window = Arc::new(
+        WindowBuilder::new()
+            .with_title("I8080 Emulator")
+            .build(&event_loop)
+            .unwrap(),
+    );
 
     let surface = Surface::from_window(instance.clone(), window.clone()).unwrap();
 
@@ -299,16 +310,20 @@ fn main() {
 
     let vertices = [
         Vertex2D {
-            position: [-0.5, -0.5],
+            position: [-1.0, -1.0],
+            tex_coords: [1.0, 0.0],
         },
         Vertex2D {
-            position: [-0.5, 0.5],
+            position: [-1.0, 1.0],
+            tex_coords: [0.0, 0.0],
         },
         Vertex2D {
-            position: [0.5, -0.5],
+            position: [1.0, -1.0],
+            tex_coords: [1.0, 1.0],
         },
         Vertex2D {
-            position: [0.5, 0.5],
+            position: [1.0, 1.0],
+            tex_coords: [0.0, 1.0],
         },
     ];
 
@@ -400,8 +415,8 @@ fn main() {
     let sampler = Sampler::new(
         device.clone(),
         SamplerCreateInfo {
-            mag_filter: Filter::Linear,
-            min_filter: Filter::Linear,
+            mag_filter: Filter::Nearest,
+            min_filter: Filter::Nearest,
             address_mode: [SamplerAddressMode::Repeat; 3],
             ..Default::default()
         },
@@ -534,6 +549,175 @@ fn main() {
                     ..
                 } => {
                     recreate_swapchain = true;
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::KeyboardInput { event, .. },
+                    ..
+                } => {
+                    if event.state == ElementState::Pressed && !event.repeat {
+                        match event.key_without_modifiers().as_ref() {
+                            // Debug Utils
+                            winit::keyboard::Key::Character("u") => {
+                                let mut state = state.lock().unwrap();
+
+                                state.stop_debug_stepping();
+                            }
+                            winit::keyboard::Key::Character("p") => {
+                                let mut state = state.lock().unwrap();
+
+                                state.start_debug_stepping();
+                            }
+                            winit::keyboard::Key::Character("n") => {
+                                let mut state = state.lock().unwrap();
+
+                                state.step_count += 1;
+                            }
+                            winit::keyboard::Key::Character("m") => {
+                                let mut state = state.lock().unwrap();
+
+                                state.step_count += 10;
+                            }
+                            winit::keyboard::Key::Character(",") => {
+                                let mut state = state.lock().unwrap();
+
+                                state.step_count += 100;
+                            }
+                            winit::keyboard::Key::Character(".") => {
+                                let mut state = state.lock().unwrap();
+
+                                state.step_count += 1000;
+                            }
+                            winit::keyboard::Key::Character("h") => {
+                                let mut state = state.lock().unwrap();
+
+                                state.call_interrupt(1);
+                            }
+                            winit::keyboard::Key::Character("b") => {
+                                let state = state.lock().unwrap();
+
+                                println!("--------------------------------------------------");
+                                println!("| A|F |  | B|C |  | D|E |  | H|L |  | PC |  | SP |");
+                                println!("|{:02x}|{:02x}|  |{:02x}|{:02x}|  |{:02x}|{:02x}|  |{:02x}|{:02x}|  |{:04x}|  |{:04x}|", state.reg_a, state.flags_to_u8(), state.reg_b, state.reg_c, state.reg_d, state.reg_e, state.reg_h, state.reg_l, state.program_counter, state.stack_pointer);
+                                println!("--------------------------------------------------");
+                            }
+                            // Game inputs
+                            winit::keyboard::Key::Character("c") => {
+                                let mut state = state.lock().unwrap();
+
+                                // deposit credit
+                                state.in_ports[1] |= 0b00000001;
+                            }
+                            winit::keyboard::Key::Character("1") => {
+                                let mut state = state.lock().unwrap();
+
+                                // 1 player start
+                                state.in_ports[1] |= 0b00000100;
+                            }
+                            winit::keyboard::Key::Character("2") => {
+                                let mut state = state.lock().unwrap();
+
+                                // 2 player start
+                                state.in_ports[1] |= 0b00000010;
+                            }
+                            winit::keyboard::Key::Character("w") => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 1 shoot
+                                state.in_ports[1] |= 0b00010000;
+                            }
+                            winit::keyboard::Key::Character("a") => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 1 left
+                                state.in_ports[1] |= 0b00100000;
+                            }
+                            winit::keyboard::Key::Character("d") => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 1 right
+                                state.in_ports[1] |= 0b01000000;
+                            }
+                            winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 2 shoot
+                                state.in_ports[2] |= 0b00010000;
+                            }
+                            winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft) => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 2 left
+                                state.in_ports[2] |= 0b00100000;
+                            }
+                            winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight) => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 2 right
+                                state.in_ports[2] |= 0b01000000;
+                            }
+                            _ => (),
+                        }
+                    }
+                    else if event.state == ElementState::Released && !event.repeat {
+                        match event.key_without_modifiers().as_ref() {
+                            // Game inputs
+                            winit::keyboard::Key::Character("c") => {
+                                let mut state = state.lock().unwrap();
+
+                                // deposit credit
+                                state.in_ports[1] &= 0b11111110;
+                            }
+                            winit::keyboard::Key::Character("1") => {
+                                let mut state = state.lock().unwrap();
+
+                                // 1 player start
+                                state.in_ports[1] &= 0b11111011;
+                            }
+                            winit::keyboard::Key::Character("2") => {
+                                let mut state = state.lock().unwrap();
+
+                                // 2 player start
+                                state.in_ports[1] &= 0b11111101;
+                            }
+                            winit::keyboard::Key::Character("w") => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 1 shoot
+                                state.in_ports[1] &= 0b11101111;
+                            }
+                            winit::keyboard::Key::Character("a") => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 1 left
+                                state.in_ports[1] &= 0b11011111;
+                            }
+                            winit::keyboard::Key::Character("d") => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 1 right
+                                state.in_ports[1] &= 0b10111111;
+                            }
+                            winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 2 shoot
+                                state.in_ports[2] &= 0b11101111;
+                            }
+                            winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft) => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 2 left
+                                state.in_ports[2] &= 0b11011111;
+                            }
+                            winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight) => {
+                                let mut state = state.lock().unwrap();
+
+                                // player 2 right
+                                state.in_ports[2] &= 0b10111111;
+                            }
+                            _ => (),
+                        }
+                    }
                 }
                 Event::WindowEvent {
                     event: WindowEvent::RedrawRequested,
